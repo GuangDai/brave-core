@@ -79,27 +79,35 @@ each one from its corresponding earlier single-cache artifact, up to 1 GiB per
 shard. Missing, invalid or larger seed artifacts are skipped.
 
 If GitHub cannot finish the build, the cache artifacts can also be downloaded
-for a compatible Apple Silicon Mac. Preserve the artifact directories and use
-ccache 4.14.2 with `CCACHE_COMPILERCHECK=content` and `CCACHE_BASEDIR` set to
-the parent of the `src` checkout. From the Brave Core checkout, verify one cache
-and print the environment settings for it with:
+for a compatible Apple Silicon Mac. Preserve their directories and use ccache
+4.14.2. The recovery tool accepts shard and stage artifact directories directly,
+or their parent run directories; repeat `--root` for multiple locations. It
+verifies the repository, architecture and every listed cache file before
+printing shell settings. For example, from the Brave Core checkout:
 
 ```sh
-python3 build/ci/lite_cache_parts.py verify --portable \
-  --root /path/to/downloaded-artifacts --workspace /path/to/workspace \
-  --repository GuangDai/brave-core --commit "$(git rev-parse HEAD)" \
-  --attempt 1 --shard 1
+env_file=$(mktemp -t brave-lite-cache-env)
+python3 build/ci/lite_recover_caches.py \
+  --root /path/to/downloaded-artifacts --repository GuangDai/brave-core \
+  --workspace /path/to/workspace --writable-cache /path/to/separate-new-cache \
+  > "$env_file" && source "$env_file"
 ```
 
-The command prints the read-only `CCACHE_REMOTE_STORAGE` and
-`CCACHE_REMOTE_ONLY` settings. Use the same `Static` build arguments and
-`--gn=cc_wrapper:ccache` shown in the workflow. Different compiler, source,
-SDK or paths can cause misses. Downloaded checkpoints and their source tree are
-also available as a separate fallback; the automated restore applies the
-stricter compatibility checks above.
-For a stage cache, put its downloaded parts under a separate root and rename
-each directory to `brave-lite-shard-SHARD-part-PART-aATTEMPT` before using the
-same verification command with the shard and attempt from its artifact names.
+The generated settings retain the downloaded directories as separate read-only
+backends and save new compiler results in `--writable-cache`. That directory
+must be separate from the downloaded artifacts. Ccache will not automatically
+trim the writable remote cache, so its disk usage can grow; the CI stages' 8 GiB
+limit does not apply on the Mac. Keep sufficient free space. Roots are searched
+in command-line order, with newer run IDs and later parts preferred within each
+root. A corrupt artifact rejects the invocation; to recover the other parts,
+pass their individual artifact directories as separate `--root` arguments.
+`--check-only` verifies the downloaded artifacts without printing shell
+settings and works on non-Mac hosts too.
+
+Use the same `Static` build arguments and `--gn=cc_wrapper:ccache` shown in the
+workflow. Different compiler, source, SDK or paths can cause misses. Downloaded
+checkpoints and their source tree are also available as a separate fallback;
+the automated restore applies the stricter compatibility checks above.
 
 For a complete checkpoint, download its manifest and every volume listed in the
 manifest into one directory. On an Apple Silicon Mac with the same macOS major

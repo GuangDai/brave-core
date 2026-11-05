@@ -1,0 +1,63 @@
+name: Test portable compiler-cache recovery
+
+on:
+  push:
+    branches: [ci/portable-cache-recovery]
+    paths:
+      - .github/workflows/lite-cache-recovery-test.yml
+      - build/ci/lite_recover_caches.py
+      - build/ci/lite_recover_caches_test.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install verified ccache and run synthetic tests
+        run: |
+          curl -fsSL https://github.com/ccache/ccache/releases/download/v4.14.2/ccache-4.14.2-darwin.tar.gz -o "$RUNNER_TEMP/ccache.tar.gz"
+          echo 'cf240009630b605b775c7c5c7b7105a3b196c79f31af322c1557969aa28003fc  '"$RUNNER_TEMP/ccache.tar.gz" | shasum -a 256 -c -
+          tar -xzf "$RUNNER_TEMP/ccache.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/ccache-4.14.2-darwin" >> "$GITHUB_PATH"
+          LITE_CCACHE_TEST_BINARY="$RUNNER_TEMP/ccache-4.14.2-darwin/ccache" \
+            python3 build/ci/lite_recover_caches_test.py -v
+      - name: Check generated shell settings on Apple Silicon
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import sys
+          sys.path.insert(0, 'build/ci')
+          from lite_shard_cache import TARGETS, entries
+          root = Path(os.environ['RUNNER_TEMP'])
+          artifact = root / 'downloaded caches/run-1/brave-lite-stage-1-shard-5-part-1-a1'
+          cache = artifact / 'cache/aa'
+          cache.mkdir(parents=True)
+          (cache / 'entry').write_text('synthetic cache entry')
+          data = {'version': 1, 'identity': {'repository': os.environ['GITHUB_REPOSITORY'],
+                                             'architecture': 'arm64'},
+                  'shard': '5', 'part': 1, 'target': TARGETS['5'],
+                  'outcome': 'checkpoint', 'files': entries(artifact / 'cache')}
+          (artifact / 'manifest.json').write_text(json.dumps(data))
+          (root / 'workspace with spaces/src/out/Static').mkdir(parents=True)
+          (root / 'workspace with spaces/src/test.c').write_text('int test(void) { return 42; }\n')
+          PY
+          python3 build/ci/lite_recover_caches.py --root "$RUNNER_TEMP/downloaded caches" \
+            --repository "$GITHUB_REPOSITORY" --workspace "$RUNNER_TEMP/workspace with spaces" \
+            --writable-cache "$RUNNER_TEMP/writable cache" > "$RUNNER_TEMP/cache-env.sh"
+          source "$RUNNER_TEMP/cache-env.sh"
+          [[ "$CCACHE_BASEDIR" == "$RUNNER_TEMP/workspace with spaces" ]]
+          [[ "$CCACHE_DIR" == "$RUNNER_TEMP/writable cache/stats" ]]
+          [[ "$CCACHE_REMOTE_ONLY" == true ]]
+          (cd "$CCACHE_BASEDIR/src/out/Static" && ccache clang -c ../../test.c -o test.o)
+          test -n "$(find "$RUNNER_TEMP/writable cache/remote" -type f -print -quit)"
