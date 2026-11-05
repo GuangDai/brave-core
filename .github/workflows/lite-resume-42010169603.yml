@@ -1,6 +1,7 @@
 name: Resume saved macOS checkpoint 42010169603
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - ci/resume-checkpoint-42010169603
@@ -19,6 +20,8 @@ jobs:
           persist-credentials: false
       - name: Test checkpoint source identity and patch verification
         run: python3 build/ci/lite_checkpoint_upgrade_test.py -v
+      - name: Check translation guards with macOS Clang
+        run: python3 build/ci/lite_translation_clang_check.py
 
   staged:
     needs: upgrade-test

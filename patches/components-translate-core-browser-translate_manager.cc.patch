@@ -1,19 +1,23 @@
 diff --git a/components/translate/core/browser/translate_manager.cc b/components/translate/core/browser/translate_manager.cc
 --- a/components/translate/core/browser/translate_manager.cc
 +++ b/components/translate/core/browser/translate_manager.cc
-@@ -322,6 +322,7 @@
-                                        std::optional<std::string> target_code,
-                                        bool auto_translate,
+@@ -324,2 +324,5 @@
                                         bool triggered_from_menu) {
-+  if (BUILDFLAG(IS_MAC)) return;
++#if BUILDFLAG(IS_MAC)
++  return;
++#else
    // If a translation is in progress, do nothing.
-   if (language_state_.translation_pending()) {
-     return;
-@@ -373,6 +374,7 @@
-                                      std::string_view target_lang,
-                                      bool triggered_from_menu,
+@@ -363,2 +366,3 @@
+       TranslateErrors::NONE, triggered_from_menu);
++#endif
+ }
+@@ -375,2 +379,5 @@
                                       TranslationType translation_type) {
-+  if (BUILDFLAG(IS_MAC)) return;
++#if BUILDFLAG(IS_MAC)
++  return;
++#else
    const GURL& page_url = translate_driver_->GetVisibleURL();
-   language_state_.SetTranslationType(translation_type);
-   // TODO(crbug.com/40898004): Very rarely, users can reach a state where this
+@@ -459,2 +466,3 @@
+                   translate_client_->GetPrefs());
++#endif
+ }
