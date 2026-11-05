@@ -6,6 +6,10 @@ on:
     paths:
       - .github/workflows/lite-stream-checkpoint-test.yml
       - build/ci/lite_checkpoint.py
+      - build/ci/lite_checkpoint_test.py
+      - build/ci/lite_stage_cache_test.py
+      - build/ci/lite_stage_phase.py
+      - build/ci/lite_stage_phase_test.py
       - build/ci/lite_stream_checkpoint.py
       - build/ci/lite_stream_checkpoint_test.py
   workflow_dispatch:
@@ -23,7 +27,10 @@ jobs:
         with:
           persist-credentials: false
       - name: Test streamed restore and credential handling
-        run: python3 build/ci/lite_stream_checkpoint_test.py -v
+        run: |
+          python3 build/ci/lite_stream_checkpoint_test.py -v
+          python3 build/ci/lite_checkpoint_test.py -v
+          python3 build/ci/lite_stage_phase_test.py -v
       - name: Create checkpoint volumes
         run: |
           PYTHONPATH=build/ci python3 - <<'PY'
@@ -101,6 +108,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Test read-only and writable compiler cache handoff
+        run: |
+          curl -fsSL https://github.com/ccache/ccache/releases/download/v4.14.2/ccache-4.14.2-darwin.tar.gz -o "$RUNNER_TEMP/ccache.tar.gz"
+          echo 'cf240009630b605b775c7c5c7b7105a3b196c79f31af322c1557969aa28003fc  '"$RUNNER_TEMP/ccache.tar.gz" | shasum -a 256 -c -
+          tar -xzf "$RUNNER_TEMP/ccache.tar.gz" -C "$RUNNER_TEMP"
+          LITE_CCACHE_TEST_BINARY="$RUNNER_TEMP/ccache-4.14.2-darwin/ccache" python3 build/ci/lite_stage_cache_test.py -v
       - name: Create checkpoint volumes
         run: |
           PYTHONPATH=build/ci python3 - <<'PY'

@@ -26,14 +26,16 @@ hit rate and total time must be measured on the real build.
 
 The main build uses at most eight successive stages. The first five try each
 target and its corresponding cache; the remaining stages build and link the
-browser. Each stage saves its checkout and build output in up to eight
+browser. Each stage saves its checkout and build output in up to sixteen 4 GiB
 compressed, SHA-256-verified volumes; the next stage restores those volumes.
 The full checkout is preserved so that incremental build metadata and source
 timestamps survive. Later stages reuse the already checked GN graph unless its
 arguments change or graph generation was interrupted. A shortage of disk space
 stops the workflow for inspection. Restore streams each volume from GitHub,
 checking its SHA-256 while extracting, so an extra complete local copy of the
-compressed checkpoint is not required.
+compressed checkpoint is not required. Each stage also uploads its newly
+compiled C/C++ cache entries separately, up to about 8 GiB, before attempting
+the full checkpoint. These entries survive a failed checkpoint upload.
 Artifacts are retained for up to 90 days. Actual build speed, artifact sizes and
 GitHub storage availability need to be measured on a full build.
 
@@ -46,6 +48,12 @@ enter the checkpoint's source commit in `resume_source_commit`. The app artifact
 records both the source and workflow commits. The runner image and macOS minor
 version may differ. Checkpoints include executable build outputs; the smoke test
 still needs to pass after a restore.
+
+When a stage checkpoint is unavailable, an earlier checkpoint can be resumed
+with the extra `rescue_cache` input set to `RUN_ID:STAGE:SHARD:ATTEMPT` for the
+later stage's cache artifact. This adds that cache to the normal shard cache.
+The run log and artifact name contain the four numbers. A cache contains
+eligible compiler results, so other build work may need to run again.
 
 For a new build, supplying an earlier shard run ID skips the five shard jobs
 and attempts to reuse the available caches, including caches saved after a
@@ -75,6 +83,9 @@ The command prints the read-only `CCACHE_REMOTE_STORAGE` and
 SDK or paths can cause misses. Downloaded checkpoints and their source tree are
 also available as a separate fallback; the automated restore applies the
 stricter compatibility checks above.
+For a stage cache, put its downloaded directory under a separate root and
+rename it to `brave-lite-shard-SHARD-part-1-aATTEMPT` before using the same
+verification command with the shard and attempt from its artifact name.
 
 On success, the workflow verifies the compiled feature flags, runs a headless
 browser smoke test, and uploads an unsigned Apple Silicon app ZIP and SHA-256

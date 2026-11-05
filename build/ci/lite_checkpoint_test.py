@@ -59,6 +59,15 @@ class CheckpointTest(unittest.TestCase):
             lite_checkpoint.restore(self.restored, self.saved, self.identity)
         self.assertEqual(list(self.restored.iterdir()), [])
 
+    def test_more_than_eight_volumes_are_recoverable(self):
+        data = os.urandom(450_000)
+        (self.work / "object.o").write_bytes(data)
+        lite_checkpoint.save(self.work, self.saved, self.identity, 50_000)
+        manifest = json.loads((self.saved / "manifest.json").read_text())
+        self.assertGreater(len(manifest["volumes"]), 8)
+        lite_checkpoint.restore(self.restored, self.saved, self.identity)
+        self.assertEqual((self.restored / "object.o").read_bytes(), data)
+
     def test_different_build_identity_is_rejected(self):
         (self.work / "file").write_text("content")
         lite_checkpoint.save(self.work, self.saved, self.identity, 100_000)

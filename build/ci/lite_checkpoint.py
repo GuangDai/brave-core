@@ -12,7 +12,7 @@ import subprocess
 import sys
 
 
-MAX_VOLUMES = 8
+MAX_VOLUMES = 16
 DEFAULT_VOLUME_BYTES = 4 * 1024 * 1024 * 1024
 MANIFEST = "manifest.json"
 

@@ -24,6 +24,9 @@ on:
       source_commit:
         required: true
         type: string
+      rescue_cache:
+        required: false
+        type: string
     outputs:
       outcome:
         value: ${{ jobs.build.outputs.outcome }}
@@ -53,29 +56,15 @@ jobs:
       attempt: ${{ github.run_attempt }}
     steps:
       - name: Start the stage clock
+        env:
+          RESTORE_STAGE: ${{ inputs.restore_stage }}
         run: |
           [[ "$LITE_SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          if [[ "$RESTORE_STAGE" == '0' && "$LITE_SOURCE_COMMIT" != "$GITHUB_SHA" ]]; then
+            echo '::error::A different source commit requires a saved checkpoint.'
+            exit 1
+          fi
           echo "LITE_JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
-
-      - name: Select this stage's target and cache
-        id: selection
-        env:
-          STAGE: ${{ inputs.stage }}
-        shell: bash
-        run: |
-          case "$STAGE" in
-            1) shard=1; target='v8:v8' ;;
-            2) shard=2; target='third_party/blink/renderer/core:core' ;;
-            3) shard=3; target='third_party/blink/renderer/modules:modules' ;;
-            4) shard=4; target='content/browser:browser' ;;
-            5) shard=5; target='chrome/browser:browser' ;;
-            6) shard=1; target='' ;;
-            7) shard=2; target='' ;;
-            8) shard=3; target='' ;;
-            *) exit 1 ;;
-          esac
-          echo "shard=$shard" >> "$GITHUB_OUTPUT"
-          echo "target=$target" >> "$GITHUB_OUTPUT"
 
       - name: Check out the build source
         if: inputs.restore_stage == '0'
@@ -155,6 +144,33 @@ jobs:
             --run-id "$RESTORE_RUN" --attempt "$RESTORE_ATTEMPT" --stage "$RESTORE_STAGE"
           test "$(git -C src/brave rev-parse HEAD)" = "$LITE_SOURCE_COMMIT"
 
+      - name: Select this stage's target and cache
+        id: selection
+        env:
+          STAGE: ${{ inputs.stage }}
+          RESTORE_STAGE: ${{ inputs.restore_stage }}
+        shell: bash
+        run: |
+          phase="$STAGE"
+          if [[ "$RESTORE_STAGE" != '0' ]]; then
+            phase=$(python3 .lite-tools/build/ci/lite_stage_phase.py next \
+              --manifest "$RUNNER_TEMP/lite-restore-manifest/manifest.json" --phase "$RESTORE_STAGE")
+          fi
+          case "$phase" in
+            1) shard=1; target='v8:v8' ;;
+            2) shard=2; target='third_party/blink/renderer/core:core' ;;
+            3) shard=3; target='third_party/blink/renderer/modules:modules' ;;
+            4) shard=4; target='content/browser:browser' ;;
+            5) shard=5; target='chrome/browser:browser' ;;
+            6) shard=1; target='' ;;
+            7) shard=2; target='' ;;
+            8) shard=3; target='' ;;
+            *) exit 1 ;;
+          esac
+          echo "phase=$phase" >> "$GITHUB_OUTPUT"
+          echo "shard=$shard" >> "$GITHUB_OUTPUT"
+          echo "target=$target" >> "$GITHUB_OUTPUT"
+
       - name: Initialize Chromium
         if: inputs.restore_stage == '0'
         working-directory: src/brave
@@ -209,10 +225,15 @@ jobs:
           SHARD: ${{ steps.selection.outputs.shard }}
           ATTEMPT: ${{ inputs.shards_attempt }}
         run: |
-          python3 build/ci/lite_cache_parts.py verify \
+          GITHUB_ENV="$RUNNER_TEMP/lite-shard-env" python3 build/ci/lite_cache_parts.py verify \
             --root "$RUNNER_TEMP/lite-shard-parts" --workspace "$GITHUB_WORKSPACE" \
             --repository "$GITHUB_REPOSITORY" --commit "$LITE_SOURCE_COMMIT" \
             --attempt "$ATTEMPT" --shard "$SHARD"
+          while IFS= read -r line; do
+            case "$line" in
+              CCACHE_REMOTE_STORAGE=*|CCACHE_REMOTE_ONLY=*) echo "$line" >> "$GITHUB_ENV" ;;
+            esac
+          done < "$RUNNER_TEMP/lite-shard-env"
 
       - name: Download a legacy single cache
         id: download_cache
@@ -241,7 +262,63 @@ jobs:
         if: steps.parts.outputs.found != 'true' && steps.download_cache.outcome != 'success'
         run: |
           echo '::warning::This shard has no saved cache; build output will still be checkpointed.'
-          echo 'CCACHE_DISABLE=true' >> "$GITHUB_ENV"
+
+      - name: Select an additional saved stage cache
+        id: rescue
+        if: inputs.rescue_cache != ''
+        env:
+          RESCUE_CACHE: ${{ inputs.rescue_cache }}
+        shell: bash
+        run: |
+          [[ "$RESCUE_CACHE" =~ ^([0-9]+):([1-8]):([1-5]):([0-9]+)$ ]]
+          echo "run=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          echo "stage=${BASH_REMATCH[2]}" >> "$GITHUB_OUTPUT"
+          echo "shard=${BASH_REMATCH[3]}" >> "$GITHUB_OUTPUT"
+          echo "attempt=${BASH_REMATCH[4]}" >> "$GITHUB_OUTPUT"
+
+      - name: Download the additional stage cache
+        if: inputs.rescue_cache != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: brave-lite-stage-${{ steps.rescue.outputs.stage }}-shard-${{ steps.rescue.outputs.shard }}-part-1-a${{ steps.rescue.outputs.attempt }}
+          path: ${{ runner.temp }}/lite-rescue/brave-lite-shard-${{ steps.rescue.outputs.shard }}-part-1-a${{ steps.rescue.outputs.attempt }}
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.rescue.outputs.run }}
+
+      - name: Verify the additional stage cache
+        if: inputs.rescue_cache != ''
+        working-directory: src/brave
+        env:
+          RESCUE_SHARD: ${{ steps.rescue.outputs.shard }}
+          RESCUE_ATTEMPT: ${{ steps.rescue.outputs.attempt }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import sys
+          sys.path.insert(0, 'build/ci')
+          from lite_cache_parts import verify
+          from lite_checkpoint import identity
+          env = os.environ
+          current = identity(env['GITHUB_REPOSITORY'], env['LITE_SOURCE_COMMIT'], Path(env['GITHUB_WORKSPACE']))
+          backends = verify(Path(env['RUNNER_TEMP']) / 'lite-rescue', current,
+                            env['RESCUE_SHARD'], env['RESCUE_ATTEMPT'])
+          with open(env['GITHUB_ENV'], 'a', encoding='utf-8') as output:
+              output.write('CCACHE_REMOTE_STORAGE=' + ' '.join(filter(None, [env.get('CCACHE_REMOTE_STORAGE', ''), backends])) + '\n')
+          PY
+
+      - name: Enable a writable cache for new compiler results
+        run: |
+          mkdir -p "$RUNNER_TEMP/lite-stage-cache"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          env = os.environ
+          writable = (Path(env['RUNNER_TEMP']) / 'lite-stage-cache').as_uri()
+          backends = ' '.join(filter(None, [env.get('CCACHE_REMOTE_STORAGE', ''), writable]))
+          with open(env['GITHUB_ENV'], 'a', encoding='utf-8') as output:
+              output.write(f'CCACHE_REMOTE_STORAGE={backends}\nCCACHE_REMOTE_ONLY=true\n')
+          PY
 
       - name: Compile until the stage deadline
         id: compile
@@ -254,6 +331,7 @@ jobs:
           if [[ -n "$LITE_BUILD_TARGET" ]]; then args+=(--target="$LITE_BUILD_TARGET"); fi
           python3 build/ci/lite_timebox.py \
             --workspace "$GITHUB_WORKSPACE" --started "$LITE_JOB_STARTED" \
+            --cache-dir "$RUNNER_TEMP/lite-stage-cache" --cache-limit-gib 8 \
             -- "${args[@]}" \
             --gn=symbol_level:0 --gn=cc_wrapper:ccache \
             --gn=use_clang_modules:false --gn=enable_precompiled_headers:false \
@@ -283,6 +361,40 @@ jobs:
             echo "outcome=$OUTCOME" >> "$GITHUB_OUTPUT"
             echo "reason=$REASON" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Record new compiler results
+        id: stage_cache
+        if: always() && steps.compile.outputs.outcome != ''
+        continue-on-error: true
+        working-directory: src/brave
+        env:
+          SHARD: ${{ steps.selection.outputs.shard }}
+          OUTCOME: ${{ steps.compile.outputs.outcome }}
+          REASON: ${{ steps.compile.outputs.reason }}
+        run: |
+          python3 build/ci/lite_cache_parts.py save \
+            --cache "$RUNNER_TEMP/lite-stage-cache" --stage "$RUNNER_TEMP/lite-stage-cache-artifact" \
+            --state "$RUNNER_TEMP/lite-stage-cache-state.json" \
+            --workspace "$GITHUB_WORKSPACE" --repository "$GITHUB_REPOSITORY" \
+            --commit "$LITE_SOURCE_COMMIT" --shard "$SHARD" --part 1 \
+            --outcome "$OUTCOME" --reason "$REASON"
+
+      - name: Upload new compiler results
+        id: upload_stage_cache
+        if: always() && steps.stage_cache.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: brave-lite-stage-${{ inputs.stage }}-shard-${{ steps.selection.outputs.shard }}-part-1-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/lite-stage-cache-artifact/
+          if-no-files-found: error
+          include-hidden-files: true
+          compression-level: 0
+          retention-days: 90
+
+      - name: Report an unavailable stage cache
+        if: always() && steps.compile.outputs.outcome != '' && steps.upload_stage_cache.outcome != 'success'
+        run: echo '::warning::The additional compiler cache could not be saved; checkpointing will still be attempted.'
 
       - name: Verify the browser
         if: steps.result.outputs.outcome == 'complete'
@@ -329,13 +441,33 @@ jobs:
         continue-on-error: ${{ steps.result.outputs.outcome == 'complete' }}
         working-directory: src/brave
         run: |
-          python3 build/ci/lite_checkpoint.py save \
+          checkpoint_tool=build/ci/lite_checkpoint.py
+          if [[ -f "$GITHUB_WORKSPACE/.lite-tools/build/ci/lite_checkpoint.py" ]]; then
+            checkpoint_tool="$GITHUB_WORKSPACE/.lite-tools/build/ci/lite_checkpoint.py"
+          fi
+          python3 "$checkpoint_tool" save \
             --workspace "$GITHUB_WORKSPACE" \
             --checkpoint "$RUNNER_TEMP/lite-checkpoint" \
             --repository "$GITHUB_REPOSITORY" --commit "$LITE_SOURCE_COMMIT"
 
-      - name: Upload checkpoint manifest
+      - name: Record the completed build phase
+        id: checkpoint_phase
         if: always() && steps.checkpoint.outcome == 'success'
+        continue-on-error: ${{ steps.result.outputs.outcome == 'complete' }}
+        env:
+          LITE_BUILD_PHASE: ${{ steps.selection.outputs.phase }}
+          LITE_PHASE_COMPLETE: ${{ steps.compile.outputs.outcome == 'complete' && 'true' || 'false' }}
+        run: |
+          phase_tool=src/brave/build/ci/lite_stage_phase.py
+          if [[ -f .lite-tools/build/ci/lite_stage_phase.py ]]; then
+            phase_tool=.lite-tools/build/ci/lite_stage_phase.py
+          fi
+          python3 "$phase_tool" record --manifest "$RUNNER_TEMP/lite-checkpoint/manifest.json" \
+            --phase "$LITE_BUILD_PHASE" --complete "$LITE_PHASE_COMPLETE"
+
+      - name: Upload checkpoint manifest
+        id: upload_checkpoint_manifest
+        if: always() && steps.checkpoint_phase.outcome == 'success'
         continue-on-error: ${{ steps.result.outputs.outcome == 'complete' }}
         uses: actions/upload-artifact@v4
         with:
@@ -345,7 +477,8 @@ jobs:
           retention-days: 90
 
       - name: Upload checkpoint part aa
-        if: always() && steps.checkpoint.outcome == 'success'
+        id: upload_checkpoint_aa
+        if: always() && steps.checkpoint_phase.outcome == 'success'
         continue-on-error: ${{ steps.result.outputs.outcome == 'complete' }}
         uses: actions/upload-artifact@v4
         with:
@@ -356,7 +489,8 @@ jobs:
           retention-days: 90
 
       - name: Upload checkpoint part ab
-        if: always() && steps.checkpoint.outcome == 'success'
+        id: upload_checkpoint_ab
+        if: always() && steps.checkpoint_phase.outcome == 'success'
         continue-on-error: ${{ steps.result.outputs.outcome == 'complete' }}
         uses: actions/upload-artifact@v4
         with:
@@ -367,7 +501,8 @@ jobs:
           retention-days: 90
 
       - name: Upload checkpoint part ac
-        if: always() && steps.checkpoint.outcome == 'success'
+        id: upload_checkpoint_ac
+        if: always() && steps.checkpoint_phase.outcome == 'success'
         continue-on-error: ${{ steps.result.outputs.outcome == 'complete' }}
         uses: actions/upload-artifact@v4
         with:
@@ -378,7 +513,8 @@ jobs:
           retention-days: 90
 
       - name: Upload checkpoint part ad
-        if: always() && steps.checkpoint.outcome == 'success'
+        id: upload_checkpoint_ad
+        if: always() && steps.checkpoint_phase.outcome == 'success'
         continue-on-error: ${{ steps.result.outputs.outcome == 'complete' }}
         uses: actions/upload-artifact@v4
         with:
@@ -389,7 +525,8 @@ jobs:
           retention-days: 90
 
       - name: Upload checkpoint part ae
-        if: always() && steps.checkpoint.outcome == 'success'
+        id: upload_checkpoint_ae
+        if: always() && steps.checkpoint_phase.outcome == 'success'
         continue-on-error: ${{ steps.result.outputs.outcome == 'complete' }}
         uses: actions/upload-artifact@v4
         with:
@@ -400,7 +537,8 @@ jobs:
           retention-days: 90
 
       - name: Upload checkpoint part af
-        if: always() && steps.checkpoint.outcome == 'success'
+        id: upload_checkpoint_af
+        if: always() && steps.checkpoint_phase.outcome == 'success'
         continue-on-error: ${{ steps.result.outputs.outcome == 'complete' }}
         uses: actions/upload-artifact@v4
         with:
@@ -411,7 +549,8 @@ jobs:
           retention-days: 90
 
       - name: Upload checkpoint part ag
-        if: always() && steps.checkpoint.outcome == 'success'
+        id: upload_checkpoint_ag
+        if: always() && steps.checkpoint_phase.outcome == 'success'
         continue-on-error: ${{ steps.result.outputs.outcome == 'complete' }}
         uses: actions/upload-artifact@v4
         with:
@@ -422,7 +561,8 @@ jobs:
           retention-days: 90
 
       - name: Upload checkpoint part ah
-        if: always() && steps.checkpoint.outcome == 'success'
+        id: upload_checkpoint_ah
+        if: always() && steps.checkpoint_phase.outcome == 'success'
         continue-on-error: ${{ steps.result.outputs.outcome == 'complete' }}
         uses: actions/upload-artifact@v4
         with:
@@ -432,8 +572,104 @@ jobs:
           compression-level: 0
           retention-days: 90
 
+      - name: Upload checkpoint part ai
+        id: upload_checkpoint_ai
+        if: always() && steps.checkpoint_phase.outcome == 'success'
+        continue-on-error: ${{ steps.result.outputs.outcome == 'complete' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: brave-lite-s${{ inputs.stage }}-a${{ github.run_attempt }}-part-ai
+          path: ${{ runner.temp }}/lite-checkpoint/part-ai
+          if-no-files-found: ignore
+          compression-level: 0
+          retention-days: 90
+
+      - name: Upload checkpoint part aj
+        id: upload_checkpoint_aj
+        if: always() && steps.checkpoint_phase.outcome == 'success'
+        continue-on-error: ${{ steps.result.outputs.outcome == 'complete' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: brave-lite-s${{ inputs.stage }}-a${{ github.run_attempt }}-part-aj
+          path: ${{ runner.temp }}/lite-checkpoint/part-aj
+          if-no-files-found: ignore
+          compression-level: 0
+          retention-days: 90
+
+      - name: Upload checkpoint part ak
+        id: upload_checkpoint_ak
+        if: always() && steps.checkpoint_phase.outcome == 'success'
+        continue-on-error: ${{ steps.result.outputs.outcome == 'complete' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: brave-lite-s${{ inputs.stage }}-a${{ github.run_attempt }}-part-ak
+          path: ${{ runner.temp }}/lite-checkpoint/part-ak
+          if-no-files-found: ignore
+          compression-level: 0
+          retention-days: 90
+
+      - name: Upload checkpoint part al
+        id: upload_checkpoint_al
+        if: always() && steps.checkpoint_phase.outcome == 'success'
+        continue-on-error: ${{ steps.result.outputs.outcome == 'complete' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: brave-lite-s${{ inputs.stage }}-a${{ github.run_attempt }}-part-al
+          path: ${{ runner.temp }}/lite-checkpoint/part-al
+          if-no-files-found: ignore
+          compression-level: 0
+          retention-days: 90
+
+      - name: Upload checkpoint part am
+        id: upload_checkpoint_am
+        if: always() && steps.checkpoint_phase.outcome == 'success'
+        continue-on-error: ${{ steps.result.outputs.outcome == 'complete' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: brave-lite-s${{ inputs.stage }}-a${{ github.run_attempt }}-part-am
+          path: ${{ runner.temp }}/lite-checkpoint/part-am
+          if-no-files-found: ignore
+          compression-level: 0
+          retention-days: 90
+
+      - name: Upload checkpoint part an
+        id: upload_checkpoint_an
+        if: always() && steps.checkpoint_phase.outcome == 'success'
+        continue-on-error: ${{ steps.result.outputs.outcome == 'complete' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: brave-lite-s${{ inputs.stage }}-a${{ github.run_attempt }}-part-an
+          path: ${{ runner.temp }}/lite-checkpoint/part-an
+          if-no-files-found: ignore
+          compression-level: 0
+          retention-days: 90
+
+      - name: Upload checkpoint part ao
+        id: upload_checkpoint_ao
+        if: always() && steps.checkpoint_phase.outcome == 'success'
+        continue-on-error: ${{ steps.result.outputs.outcome == 'complete' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: brave-lite-s${{ inputs.stage }}-a${{ github.run_attempt }}-part-ao
+          path: ${{ runner.temp }}/lite-checkpoint/part-ao
+          if-no-files-found: ignore
+          compression-level: 0
+          retention-days: 90
+
+      - name: Upload checkpoint part ap
+        id: upload_checkpoint_ap
+        if: always() && steps.checkpoint_phase.outcome == 'success'
+        continue-on-error: ${{ steps.result.outputs.outcome == 'complete' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: brave-lite-s${{ inputs.stage }}-a${{ github.run_attempt }}-part-ap
+          path: ${{ runner.temp }}/lite-checkpoint/part-ap
+          if-no-files-found: ignore
+          compression-level: 0
+          retention-days: 90
+
       - name: Report an unavailable final checkpoint
-        if: always() && steps.result.outputs.outcome == 'complete' && steps.checkpoint.outcome != 'success'
+        if: always() && steps.result.outputs.outcome == 'complete' && (steps.checkpoint_phase.outcome != 'success' || steps.upload_checkpoint_manifest.outcome != 'success' || steps.upload_checkpoint_aa.outcome == 'failure' || steps.upload_checkpoint_ab.outcome == 'failure' || steps.upload_checkpoint_ac.outcome == 'failure' || steps.upload_checkpoint_ad.outcome == 'failure' || steps.upload_checkpoint_ae.outcome == 'failure' || steps.upload_checkpoint_af.outcome == 'failure' || steps.upload_checkpoint_ag.outcome == 'failure' || steps.upload_checkpoint_ah.outcome == 'failure' || steps.upload_checkpoint_ai.outcome == 'failure' || steps.upload_checkpoint_aj.outcome == 'failure' || steps.upload_checkpoint_ak.outcome == 'failure' || steps.upload_checkpoint_al.outcome == 'failure' || steps.upload_checkpoint_am.outcome == 'failure' || steps.upload_checkpoint_an.outcome == 'failure' || steps.upload_checkpoint_ao.outcome == 'failure' || steps.upload_checkpoint_ap.outcome == 'failure')
         run: echo '::warning::The browser was built, but its reusable checkpoint could not be saved.'
 
       - name: Report disk usage
