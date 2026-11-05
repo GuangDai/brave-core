@@ -1,8 +1,15 @@
 name: Experimental shared-prerequisite macOS build
 
 on:
+  push:
+    branches: [ci/shared-bootstrap]
+    paths: [.github/workflows/lite-shared-build.yml]
   workflow_dispatch:
     inputs:
+      dry_run:
+        description: Validate dispatch without starting a macOS build
+        type: boolean
+        default: false
       resume_run_id:
         description: Run containing a verified workspace checkpoint
         type: string
@@ -37,7 +44,14 @@ permissions:
   contents: read
 
 jobs:
+  validate:
+    if: github.event_name == 'push' || inputs.dry_run
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'Shared build workflow is registered; no macOS build was started.'
+
   bootstrap1:
+    if: github.event_name == 'workflow_dispatch' && !inputs.dry_run
     uses: ./.github/workflows/lite-macos-stage.yml
     with:
       stage: 1
@@ -157,7 +171,7 @@ jobs:
 
   select_bootstrap:
     needs: [bootstrap1, bootstrap2, bootstrap3, bootstrap4, bootstrap5, bootstrap6, bootstrap7, bootstrap8]
-    if: always()
+    if: always() && github.event_name == 'workflow_dispatch' && !inputs.dry_run
     runs-on: ubuntu-latest
     outputs:
       stage: ${{ steps.select.outputs.stage }}
