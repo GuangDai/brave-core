@@ -184,3 +184,23 @@ jobs:
           output = Path(os.environ['RUNNER_TEMP']) / 'lite-workspace' / 'object.o'
           assert output.read_bytes() == random.Random(13).randbytes(250_000)
           PY
+      - name: Download the volumes for portable recovery
+        uses: actions/download-artifact@v4
+        with:
+          pattern: brave-lite-s2-a${{ github.run_attempt }}-part-*
+          path: ${{ runner.temp }}/portable-checkpoint
+          merge-multiple: true
+      - name: Restore on a simulated physical Mac at a new path
+        run: |
+          cp "$RUNNER_TEMP/manifest/manifest.json" "$RUNNER_TEMP/portable-checkpoint/manifest.json"
+          env -u ImageOS -u ImageVersion python3 build/ci/lite_checkpoint.py restore --portable --allow-relocation \
+            --workspace "$RUNNER_TEMP/lite-portable-workspace" \
+            --checkpoint "$RUNNER_TEMP/portable-checkpoint" \
+            --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import random
+          output = Path(os.environ['RUNNER_TEMP']) / 'lite-portable-workspace' / 'object.o'
+          assert output.read_bytes() == random.Random(13).randbytes(250_000)
+          PY
