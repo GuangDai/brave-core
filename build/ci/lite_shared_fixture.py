@@ -5,9 +5,9 @@ import argparse
 from pathlib import Path
 
 
-def create(root):
+def create(root, build_name="Static"):
     config = root / "build/config/siso"
-    build = root / "out/Static"
+    build = root / "out" / build_name
     config.mkdir(parents=True)
     build.mkdir(parents=True)
     (root / ".gn").write_text("")
@@ -39,8 +39,8 @@ with open('compiled.log', 'a') as log:
     (build / "build.ninja").write_text(''.join(graph))
 
 
-def verify(root, expect_leaf):
-    compiled = (root / "out/Static/compiled.log").read_text().splitlines()
+def verify(root, expect_leaf, build_name="Static"):
+    compiled = (root / "out" / build_name / "compiled.log").read_text().splitlines()
     if compiled.count("obj/shared.o") != 1:
         raise RuntimeError(f"Shared prerequisite was rebuilt: {compiled}")
     leaves = [line for line in compiled if line.startswith("obj/leaf")]
@@ -53,11 +53,14 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("action", choices=["create", "bootstrap", "group"])
     parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--build-name", default="Static")
     args = parser.parse_args()
+    if args.build_name not in ("Static", "Static_arm64"):
+        parser.error("Invalid fixture build name")
     if args.action == "create":
-        create(args.root)
+        create(args.root, args.build_name)
     else:
-        verify(args.root, args.action == "group")
+        verify(args.root, args.action == "group", args.build_name)
 
 
 if __name__ == "__main__":

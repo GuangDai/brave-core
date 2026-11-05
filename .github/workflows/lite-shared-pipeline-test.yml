@@ -1,0 +1,129 @@
+name: Test shared build workflow plumbing
+
+on:
+  push:
+    branches: [ci/shared-bootstrap]
+    paths:
+      - .github/workflows/lite-shared-pipeline-test.yml
+      - .github/workflows/lite-shared-group.yml
+      - .github/workflows/lite-macos-stage.yml
+      - .github/actions/lite-stage-cache-phase/action.yml
+      - build/ci/lite_shared_fake_build.py
+      - build/ci/lite_shared_fixture.py
+      - build/ci/lite_shared_plan.py
+      - build/ci/lite_stage_phase.py
+      - build/ci/lite_siso_config_verify.py
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  seed:
+    runs-on: macos-26
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: src/brave
+          persist-credentials: false
+      - name: Create a synthetic source tree and install Siso
+        run: |
+          python3 src/brave/build/ci/lite_shared_fixture.py create --root "$GITHUB_WORKSPACE/src" --build-name Static_arm64
+          cp src/brave/build/config/siso/brave_siso_config.star src/build/config/siso/brave_siso_config.star
+          cat > src/brave/package.json <<'JSON'
+          {"name":"brave-lite-shared-fixture","private":true,"scripts":{"build":"python3 build/ci/lite_shared_fake_build.py"}}
+          JSON
+          curl -fsSL 'https://chrome-infra-packages.appspot.com/client?platform=mac-arm64&version=git_revision:43615ea9acdcc6c1c213c5c7a30a568fdeb7c3dc' -o "$RUNNER_TEMP/cipd"
+          chmod +x "$RUNNER_TEMP/cipd"
+          printf '%s\n' 'build/siso/mac-arm64 git_revision:c574896b272b40aac6e44c228ee0b471ea7e3d7d' > "$RUNNER_TEMP/siso.ensure"
+          CIPD_CACHE_DIR="$RUNNER_TEMP/cipd-cache" "$RUNNER_TEMP/cipd" ensure \
+            -root "$GITHUB_WORKSPACE/src/tools/siso" -ensure-file "$RUNNER_TEMP/siso.ensure"
+          python3 src/brave/build/ci/lite_checkpoint.py save --workspace "$GITHUB_WORKSPACE" \
+            --checkpoint "$RUNNER_TEMP/seed" --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          manifest = json.loads((Path(os.environ['RUNNER_TEMP']) / 'seed/manifest.json').read_text())
+          assert len(manifest['volumes']) == 1
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brave-lite-s8-a${{ github.run_attempt }}-manifest
+          path: ${{ runner.temp }}/seed/manifest.json
+          if-no-files-found: error
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brave-lite-s8-a${{ github.run_attempt }}-part-aa
+          path: ${{ runner.temp }}/seed/part-aa
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  bootstrap:
+    needs: seed
+    uses: ./.github/workflows/lite-macos-stage.yml
+    with:
+      stage: 1
+      restore_stage: '8'
+      restore_run_id: ${{ format('{0}', github.run_id) }}
+      restore_attempt: ${{ format('{0}', github.run_attempt) }}
+      source_commit: ${{ github.sha }}
+      shards_run_id: ${{ format('{0}', github.run_id) }}
+      shards_attempt: ${{ format('{0}', github.run_attempt) }}
+      shared_mode: bootstrap
+
+  groups:
+    needs: bootstrap
+    if: needs.bootstrap.result == 'success' && needs.bootstrap.outputs.reason == 'next'
+    strategy:
+      fail-fast: false
+      matrix:
+        group: ['1', '5']
+    uses: ./.github/workflows/lite-shared-group.yml
+    with:
+      group: ${{ matrix.group }}
+      checkpoint_run_id: ${{ format('{0}', github.run_id) }}
+      checkpoint_stage: '1'
+      checkpoint_attempt: ${{ needs.bootstrap.outputs.attempt }}
+      source_commit: ${{ github.sha }}
+
+  assembly:
+    needs: [bootstrap, groups]
+    if: needs.bootstrap.result == 'success' && needs.groups.result == 'success'
+    uses: ./.github/workflows/lite-macos-stage.yml
+    with:
+      stage: 2
+      restore_stage: '1'
+      restore_run_id: ${{ format('{0}', github.run_id) }}
+      restore_attempt: ${{ needs.bootstrap.outputs.attempt }}
+      source_commit: ${{ github.sha }}
+      shards_run_id: ${{ format('{0}', github.run_id) }}
+      shards_attempt: ${{ format('{0}', github.run_attempt) }}
+      start_phase: shared
+      shared_mode: assembly
+
+  verify:
+    needs: assembly
+    if: needs.assembly.result == 'success' && needs.assembly.outputs.reason == 'next'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: brave-lite-s2-a${{ github.run_attempt }}-manifest
+          path: ${{ runner.temp }}/manifest
+      - name: Verify that shared assembly advanced from group one
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          manifest = json.loads((Path(os.environ['RUNNER_TEMP']) / 'manifest/manifest.json').read_text())
+          assert manifest['shared_complete'] is True
+          assert manifest['shared_assembly'] is True
+          assert manifest['build_phase'] == 1
+          assert manifest['phase_complete'] is True
+          PY
