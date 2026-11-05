@@ -65,6 +65,7 @@ jobs:
         uses: ./src/brave/.github/actions/lite-publish-app
         with:
           stage: ${{ matrix.stage }}
+          artifact_name: lite-app-fixture-stage-${{ matrix.stage }}
       - name: Check the verification result
         env:
           EXPECTED: ${{ matrix.verification }}
@@ -75,7 +76,7 @@ jobs:
           [[ "$VERIFY_OUTCOME" == "$EXPECTED" ]]
       - uses: actions/download-artifact@v4
         with:
-          name: Brave-Lite-macOS-arm64-stage-${{ matrix.stage }}
+          name: lite-app-fixture-stage-${{ matrix.stage }}
           path: ${{ runner.temp }}/saved-app
       - name: Check the preserved app and provenance
         env:
