@@ -92,7 +92,13 @@ def verify_artifact(path, repository):
             or (info["part"] is None and "part" in manifest)):
         raise ValueError(f"Cache identity or status differs: {path}")
     expected = manifest.get("files")
-    if not isinstance(expected, list):
+    if (not isinstance(expected, list)
+            or not all(isinstance(item, dict) and set(item) == {"name", "size", "sha256"}
+                       and isinstance(item["name"], str) and bool(item["name"])
+                       and type(item["size"]) is int and item["size"] >= 0
+                       and isinstance(item["sha256"], str)
+                       and re.fullmatch(r"[a-f0-9]{64}", item["sha256"])
+                       for item in expected)):
         raise ValueError(f"Invalid cache file list: {path}")
     if not cache.exists() and not expected:
         return None
