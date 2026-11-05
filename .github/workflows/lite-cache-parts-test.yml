@@ -82,6 +82,21 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      - name: Record a legacy cache from a failed build
+        run: |
+          python3 src/brave/build/ci/lite_shard_cache.py save \
+            --root "$RUNNER_TEMP/lite-shard" --workspace "$CCACHE_BASEDIR" \
+            --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA" \
+            --shard 1 --target v8:v8 --outcome failed
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brave-lite-shard-1-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/lite-shard/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
   reuse:
     needs: save
     runs-on: macos-26
@@ -126,5 +141,29 @@ jobs:
           ccache "$LITE_CLANG" -c "$CCACHE_BASEDIR/src/second.c" -o second.o
           nm first.o | grep _first
           nm second.o | grep _second
+          ccache --show-stats -v
+          ccache --print-stats | awk '$1 == "remote_storage_hit" && $2 == 2 { ok=1 } END { exit !ok }'
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: brave-lite-shard-1-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/seed/brave-lite-shard-1-a${{ github.run_attempt }}
+
+      - name: Seed a new writable cache
+        run: |
+          mkdir -p "$RUNNER_TEMP/new-cache"
+          python3 src/brave/build/ci/lite_shard_cache.py verify-one --portable \
+            --root "$RUNNER_TEMP/seed" --workspace "$CCACHE_BASEDIR" \
+            --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA" \
+            --attempt "$GITHUB_RUN_ATTEMPT" --shard 1 --seed-to "$RUNNER_TEMP/new-cache"
+          echo "CCACHE_REMOTE_STORAGE=file:$RUNNER_TEMP/new-cache" >> "$GITHUB_ENV"
+          echo "CCACHE_DIR=$RUNNER_TEMP/new-stats" >> "$GITHUB_ENV"
+
+      - name: Reuse the seed without recompiling
+        shell: bash
+        run: |
+          cd "$CCACHE_BASEDIR/src"
+          ccache "$LITE_CLANG" -c "$CCACHE_BASEDIR/src/first.c" -o first.o
+          ccache "$LITE_CLANG" -c "$CCACHE_BASEDIR/src/second.c" -o second.o
           ccache --show-stats -v
           ccache --print-stats | awk '$1 == "remote_storage_hit" && $2 == 2 { ok=1 } END { exit !ok }'
