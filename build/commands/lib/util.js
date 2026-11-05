@@ -21,6 +21,7 @@ import { getBuildArgs } from './buildArgs.ts'
 import { isCI, isTeamcity } from './ciDetect.ts'
 import * as buildDiagnostics from './buildDiagnostics.ts'
 import * as processUtil from './processUtil.ts'
+import { shouldCleanInterruptedBuild } from './interruptedBuild.js'
 
 // Do not limit the number of listeners to avoid warnings from EventEmitter.
 process.setMaxListeners(0)
@@ -663,7 +664,8 @@ const util = {
 
     // Ensure siso_output doesn't exist before the build.
     const sisoOutputFile = path.join(outputDir, 'siso_output')
-    if (fs.existsSync(sisoOutputFile)) {
+    const preserveBuildOutput = process.env.BRAVE_LITE_KEEP_BUILD_OUTPUT === '1'
+    if (!preserveBuildOutput && fs.existsSync(sisoOutputFile)) {
       fs.unlinkSync(sisoOutputFile)
     }
 
@@ -677,13 +679,10 @@ const util = {
 
     const buildGuard = new ActionGuard(path.join(outputDir, 'build.guard'))
     try {
-      if (
-        isCI
-        // Release builds can have steps that can be interrupted by timeouts. We
-        // don't want to clean the build in this case.
-        && !config.isBraveReleaseBuild()
-        && buildGuard.wasInterrupted()
-      ) {
+      if (shouldCleanInterruptedBuild(
+        isCI, config.isBraveReleaseBuild(), buildGuard.wasInterrupted(),
+        preserveBuildOutput,
+      )) {
         await util.runAsync('gn', ['clean', outputDir], options)
       }
       buildGuard.markStarted()

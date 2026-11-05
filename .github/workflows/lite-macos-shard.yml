@@ -44,6 +44,7 @@ jobs:
           tar -xzf "$RUNNER_TEMP/ccache.tar.gz" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/ccache-4.14.2-darwin" >> "$GITHUB_PATH"
           echo "CCACHE_DIR=$RUNNER_TEMP/ccache-stats" >> "$GITHUB_ENV"
+          echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
           echo 'CCACHE_COMPILERCHECK=content' >> "$GITHUB_ENV"
           echo 'CCACHE_REMOTE_ONLY=true' >> "$GITHUB_ENV"
           echo "CCACHE_REMOTE_STORAGE=file:$RUNNER_TEMP/lite-shard/cache" >> "$GITHUB_ENV"
@@ -109,4 +110,4 @@ jobs:
           if-no-files-found: error
           include-hidden-files: true
           compression-level: 0
-          retention-days: 7
+          retention-days: 90

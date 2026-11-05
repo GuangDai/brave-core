@@ -21,7 +21,11 @@ class CheckpointTest(unittest.TestCase):
         self.work.mkdir()
         self.saved = self.root / "checkpoint"
         self.restored = self.root / "restored"
-        self.identity = {"repository": "example/project", "commit": "abc"}
+        self.identity = {"repository": "example/project", "commit": "abc",
+                         "workspace": "/workspace", "architecture": "arm64",
+                         "image_os": "macos26", "image_version": "first",
+                         "macos_version": "26.6.2", "xcode_version": "26.6",
+                         "sdk_version": "26.5"}
 
     def test_round_trip_preserves_files_permissions_and_symlinks(self):
         (self.work / "object.o").write_bytes(os.urandom(250_000))
@@ -61,6 +65,17 @@ class CheckpointTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "toolchain differs"):
             lite_checkpoint.restore(self.restored, self.saved, {"commit": "other"})
         self.assertEqual(list(self.restored.iterdir()), [])
+
+    def test_minor_runner_image_change_retains_matching_toolchain(self):
+        (self.work / "file").write_text("content")
+        lite_checkpoint.save(self.work, self.saved, self.identity, 100_000)
+        newer = {**self.identity, "image_version": "second", "macos_version": "26.7.2"}
+        lite_checkpoint.restore(self.restored, self.saved, newer)
+        self.assertEqual((self.restored / "file").read_text(), "content")
+        self.assertFalse(lite_checkpoint.compatible_identity(
+            self.identity, {**newer, "xcode_version": "27"}))
+        self.assertFalse(lite_checkpoint.compatible_identity(
+            self.identity, {**newer, "macos_version": "27.0"}))
 
 
 if __name__ == "__main__":

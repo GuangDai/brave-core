@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 
@@ -55,16 +56,23 @@ def verify_one(root, build_identity, attempt, shard):
         raise ValueError("Invalid attempt or shard")
     path = root / f"brave-lite-shard-{shard}-a{attempt}"
     manifest = json.loads((path / MANIFEST).read_text())
-    if (manifest.get("version") != 1 or manifest.get("identity") != build_identity
+    saved_identity = manifest.get("identity")
+    if (manifest.get("version") != 1 or not isinstance(saved_identity, dict)
+            or saved_identity.get("repository") != build_identity.get("repository")
+            or saved_identity.get("architecture") != build_identity.get("architecture")
             or manifest.get("shard") != shard or manifest.get("target") != TARGETS[shard]
-            or manifest.get("outcome") not in ("complete", "checkpoint")):
+            or manifest.get("outcome") not in ("complete", "checkpoint", "failed")):
         raise RuntimeError(f"Shard {shard} identity or status differs")
     actual = entries(path / "cache")
     if not actual or actual != manifest.get("files"):
         raise RuntimeError(f"Shard {shard} cache failed verification")
     print(f"Verified shard {shard}: {len(actual)} files, "
           f"{sum(f['size'] for f in actual)} bytes", flush=True)
-    return f"file:{path / 'cache'}|read-only"
+    if saved_identity != build_identity:
+        print(f"Shard {shard} was produced by commit {saved_identity.get('commit')} "
+              f"and image {saved_identity.get('image_version')}; ccache checks compiler "
+              "and input content before reuse", flush=True)
+    return f"{(path / 'cache').resolve().as_uri()}|read-only"
 
 
 def verify_set(root, build_identity, attempt):
@@ -83,8 +91,11 @@ def main():
     parser.add_argument("--outcome")
     parser.add_argument("--reason", default="")
     parser.add_argument("--attempt")
+    parser.add_argument("--portable", action="store_true",
+                        help="allow a physical Mac without GitHub runner metadata")
     args = parser.parse_args()
-    build_identity = identity(args.repository, args.commit, args.workspace)
+    build_identity = identity(args.repository, args.commit, args.workspace,
+                              require_runner=not args.portable)
     if args.action == "save":
         save(args.root, build_identity, args.shard, args.target, args.outcome, args.reason)
     else:
@@ -92,8 +103,12 @@ def main():
             backend = verify_one(args.root, build_identity, args.attempt or "", args.shard)
         else:
             backend = verify_set(args.root, build_identity, args.attempt or "")
-        with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
-            env.write(f"CCACHE_REMOTE_STORAGE={backend}\n")
+        if output := os.environ.get("GITHUB_ENV"):
+            with open(output, "a", encoding="utf-8") as env:
+                env.write(f"CCACHE_REMOTE_STORAGE={backend}\nCCACHE_REMOTE_ONLY=true\n")
+        else:
+            print(f"export CCACHE_REMOTE_STORAGE={shlex.quote(backend)}")
+            print("export CCACHE_REMOTE_ONLY=true")
 
 
 if __name__ == "__main__":

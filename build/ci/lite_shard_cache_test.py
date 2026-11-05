@@ -15,7 +15,8 @@ class ShardCacheTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(dir=test_root)
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        self.identity = {"repository": "example/project", "commit": "abc"}
+        self.identity = {"repository": "example/project", "commit": "abc",
+                         "architecture": "arm64"}
         for shard, target in lite_shard_cache.TARGETS.items():
             path = self.root / f"brave-lite-shard-{shard}-a1"
             cache = path / "cache" / "aa"
@@ -27,9 +28,13 @@ class ShardCacheTest(unittest.TestCase):
         backends = lite_shard_cache.verify_set(self.root, self.identity, "1")
         self.assertEqual(backends.count("|read-only"), 5)
 
-    def test_corruption_and_other_commit_are_rejected(self):
+    def test_changed_commit_can_reuse_matching_cache_entries(self):
+        changed = {**self.identity, "commit": "new", "image_version": "new"}
+        self.assertIn("|read-only", lite_shard_cache.verify_set(self.root, changed, "1"))
+
+    def test_corruption_and_other_repository_are_rejected(self):
         with self.assertRaisesRegex(RuntimeError, "identity"):
-            lite_shard_cache.verify_set(self.root, {"commit": "other"}, "1")
+            lite_shard_cache.verify_set(self.root, {**self.identity, "repository": "other"}, "1")
         entry = self.root / "brave-lite-shard-2-a1" / "cache" / "aa" / "entry"
         entry.write_text("modified")
         with self.assertRaisesRegex(RuntimeError, "failed verification"):

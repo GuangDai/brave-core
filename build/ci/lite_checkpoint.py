@@ -24,13 +24,13 @@ def digest(path):
     return result.hexdigest()
 
 
-def identity(repository, commit, workspace):
+def identity(repository, commit, workspace, require_runner=True):
     if platform.system() != "Darwin":
         raise RuntimeError("The build checkpoint requires a macOS runner")
     if not repository or not commit:
         raise RuntimeError("Repository and commit must be set")
     image_version = os.environ.get("ImageVersion", "")
-    if not image_version:
+    if require_runner and not image_version:
         raise RuntimeError("Runner image version is unavailable")
     return {
         "repository": repository,
@@ -49,6 +49,18 @@ def identity(repository, commit, workspace):
             ["xcrun", "--sdk", "macosx", "--show-sdk-version"], text=True
         ).strip(),
     }
+
+
+def compatible_identity(saved, current):
+    required = ("repository", "commit", "workspace", "architecture", "image_os",
+                "xcode_version", "sdk_version")
+    if not isinstance(saved, dict) or not all(
+        key in saved and saved[key] == current.get(key) for key in required
+    ):
+        return False
+    old_os = saved.get("macos_version", "").split(".")[0]
+    new_os = current.get("macos_version", "").split(".")[0]
+    return bool(old_os) and old_os == new_os
 
 
 def check_pipeline(processes):
@@ -108,8 +120,11 @@ def restore(workspace, source, build_identity):
     if unexpected:
         raise RuntimeError(f"Restore workspace is not empty: {unexpected}")
     manifest = json.loads((source / MANIFEST).read_text())
-    if manifest.get("version") != 1 or manifest.get("identity") != build_identity:
+    saved_identity = manifest.get("identity")
+    if manifest.get("version") != 1 or not compatible_identity(saved_identity, build_identity):
         raise RuntimeError("Checkpoint repository, commit or toolchain differs")
+    if saved_identity != build_identity:
+        print("Runner image or macOS minor version changed; Xcode and SDK match", flush=True)
     volumes = manifest.get("volumes")
     if not isinstance(volumes, list) or not 1 <= len(volumes) <= MAX_VOLUMES:
         raise RuntimeError("Invalid checkpoint volume list")

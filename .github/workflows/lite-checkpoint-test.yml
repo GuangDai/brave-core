@@ -9,6 +9,10 @@ on:
       - build/ci/lite_checkpoint_test.py
       - build/ci/lite_timebox.py
       - build/ci/lite_timebox_test.py
+      - build/ci/lite_shard_cache.py
+      - build/ci/lite_shard_cache_test.py
+      - build/ci/lite_interrupted_build_test.js
+      - build/commands/lib/interruptedBuild.js
       - .github/workflows/lite-checkpoint-test.yml
 
 permissions:
@@ -26,6 +30,8 @@ jobs:
         run: |
           python3 build/ci/lite_checkpoint_test.py -v
           python3 build/ci/lite_timebox_test.py -v
+          python3 build/ci/lite_shard_cache_test.py -v
+          node --test build/ci/lite_interrupted_build_test.js
       - name: Save a checkpoint
         run: |
           mkdir -p "$RUNNER_TEMP/fixture"
