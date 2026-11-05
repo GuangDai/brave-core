@@ -1,0 +1,28 @@
+name: macOS runner capacity
+
+on:
+  push:
+    branches: [lite/v1.98.63]
+    paths: [.github/workflows/lite-macos-capacity.yml]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  capacity:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - name: Inspect available build resources
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sw_vers
+          uname -m
+          sysctl -n hw.ncpu hw.memsize
+          df -h "$RUNNER_TEMP" "$GITHUB_WORKSPACE"
+          xcode-select -p
+          xcodebuild -version
+          ls /Applications | grep '^Xcode' || true
+          node --version
+          git --version
