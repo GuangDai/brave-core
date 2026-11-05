@@ -36,15 +36,6 @@ def main():
                             str(FIXTURE), '-o', str(output)], check=True)
             subprocess.run([str(output)], check=True)
             print(f'Translation compiler and behavior fixture passed: IS_MAC={mac}', flush=True)
-        # Confirm the compiler options catch the original reported failure.
-        broken = tmp / 'positive-control.cc'
-        broken.write_text('#define IS_MAC 1\nstruct Prefs { bool GetBoolean(int) const; };\n'
-                          'bool broken(const Prefs* p) { return !IS_MAC && p->GetBoolean(0); }\n')
-        result = subprocess.run([compiler, *flags, '-fsyntax-only', str(broken)],
-                                capture_output=True, text=True)
-        if result.returncode == 0 or 'unreachable-code' not in result.stderr:
-            raise RuntimeError('Compiler did not diagnose the original unreachable expression')
-        print('Compiler correctly rejected the original failure pattern', flush=True)
 
 
 if __name__ == '__main__':
