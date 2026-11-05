@@ -27,6 +27,10 @@ on:
       rescue_cache:
         required: false
         type: string
+      start_phase:
+        required: false
+        default: '5'
+        type: string
     outputs:
       outcome:
         value: ${{ jobs.build.outputs.outcome }}
@@ -147,11 +151,11 @@ jobs:
       - name: Select this stage's target and cache
         id: selection
         env:
-          STAGE: ${{ inputs.stage }}
+          START_PHASE: ${{ inputs.start_phase }}
           RESTORE_STAGE: ${{ inputs.restore_stage }}
         shell: bash
         run: |
-          phase="$STAGE"
+          phase="$START_PHASE"
           if [[ "$RESTORE_STAGE" != '0' ]]; then
             phase=$(python3 .lite-tools/build/ci/lite_stage_phase.py next \
               --manifest "$RUNNER_TEMP/lite-restore-manifest/manifest.json" --phase "$RESTORE_STAGE")
@@ -271,25 +275,44 @@ jobs:
         run: |
           echo '::warning::This shard has no saved cache; build output will still be checkpointed.'
 
-      - name: Select an additional saved stage cache
+      - name: Select an additional saved compiler cache
         id: rescue
         if: inputs.rescue_cache != ''
         env:
           RESCUE_CACHE: ${{ inputs.rescue_cache }}
         shell: bash
         run: |
-          [[ "$RESCUE_CACHE" =~ ^([0-9]+):([1-8]):([1-5]):([0-9]+)$ ]]
-          echo "run=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
-          echo "stage=${BASH_REMATCH[2]}" >> "$GITHUB_OUTPUT"
-          echo "shard=${BASH_REMATCH[3]}" >> "$GITHUB_OUTPUT"
-          echo "attempt=${BASH_REMATCH[4]}" >> "$GITHUB_OUTPUT"
+          if [[ "$RESCUE_CACHE" =~ ^([0-9]+):([1-8]):([1-5]):([0-9]+)$ ]]; then
+            echo 'kind=stage' >> "$GITHUB_OUTPUT"
+            echo "run=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+            echo "stage=${BASH_REMATCH[2]}" >> "$GITHUB_OUTPUT"
+            echo "shard=${BASH_REMATCH[3]}" >> "$GITHUB_OUTPUT"
+            echo "attempt=${BASH_REMATCH[4]}" >> "$GITHUB_OUTPUT"
+          elif [[ "$RESCUE_CACHE" =~ ^([0-9]+):([1-5]):([0-9]+)$ ]]; then
+            echo 'kind=shard' >> "$GITHUB_OUTPUT"
+            echo "run=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+            echo "shard=${BASH_REMATCH[2]}" >> "$GITHUB_OUTPUT"
+            echo "attempt=${BASH_REMATCH[3]}" >> "$GITHUB_OUTPUT"
+          else
+            echo '::error::Invalid additional cache selection.'
+            exit 1
+          fi
 
       - name: Download the additional stage cache
-        if: inputs.rescue_cache != ''
+        if: steps.rescue.outputs.kind == 'stage'
         uses: actions/download-artifact@v4
         with:
           name: brave-lite-stage-${{ steps.rescue.outputs.stage }}-shard-${{ steps.rescue.outputs.shard }}-part-1-a${{ steps.rescue.outputs.attempt }}
           path: ${{ runner.temp }}/lite-rescue/brave-lite-shard-${{ steps.rescue.outputs.shard }}-part-1-a${{ steps.rescue.outputs.attempt }}
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.rescue.outputs.run }}
+
+      - name: Download the additional shard cache
+        if: steps.rescue.outputs.kind == 'shard'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: brave-lite-shard-${{ steps.rescue.outputs.shard }}-part-*-a${{ steps.rescue.outputs.attempt }}
+          path: ${{ runner.temp }}/lite-rescue
           github-token: ${{ github.token }}
           run-id: ${{ steps.rescue.outputs.run }}
 

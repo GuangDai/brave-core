@@ -20,9 +20,13 @@ on:
         type: string
         default: ''
       rescue_cache:
-        description: Extra stage cache in RUN_ID:STAGE:SHARD:ATTEMPT format
+        description: Extra cache in RUN_ID:SHARD:ATTEMPT or RUN_ID:STAGE:SHARD:ATTEMPT format
         type: string
         default: ''
+      start_phase:
+        description: Initial target phase for a new build (1–8; default 5)
+        type: string
+        default: '5'
       shards_run_id:
         description: Existing shard run ID (reuse caches or resume from another run)
         type: string
@@ -78,6 +82,7 @@ jobs:
       restore_attempt: ${{ inputs.resume_attempt || '1' }}
       source_commit: ${{ inputs.resume_source_commit || github.sha }}
       rescue_cache: ${{ inputs.rescue_cache || '' }}
+      start_phase: ${{ inputs.start_phase || '5' }}
       shards_run_id: ${{ inputs.shards_run_id || (inputs.resume_stage != '' && inputs.resume_stage != '0' && inputs.resume_run_id) || format('{0}', github.run_id) }}
       shards_attempt: ${{ (inputs.shards_run_id != '' && (inputs.shards_attempt || '1')) || (inputs.resume_stage != '' && inputs.resume_stage != '0' && inputs.resume_attempt) || format('{0}', github.run_attempt) }}
 

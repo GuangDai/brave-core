@@ -24,9 +24,12 @@ Clang modules and precompiled headers are disabled to make more compiler
 outputs eligible for ccache. This can make an initial compile slower; cache
 hit rate and total time must be measured on the real build.
 
-The main build uses at most eight successive stages. The first five try each
-target and its corresponding cache; the remaining stages build and link the
-browser. Each stage saves its checkout and build output in up to sixteen 4 GiB
+The main build uses at most eight successive stages. By default it starts with
+the `chrome/browser` target and its cache, then builds and links the browser.
+The generated build graph for this configuration shows that this target's
+commands include those of the other four shard targets. `start_phase` can be
+set to 1–4 to start with an earlier target when needed. An interrupted phase
+continues in the next stage. Each stage saves its checkout and build output in up to sixteen 4 GiB
 compressed, SHA-256-verified volumes; the next stage restores those volumes.
 The full checkout is preserved so that incremental build metadata and source
 timestamps survive. Later stages reuse the already checked GN graph unless its
@@ -49,10 +52,11 @@ records both the source and workflow commits. The runner image and macOS minor
 version may differ. Checkpoints include executable build outputs; the smoke test
 still needs to pass after a restore.
 
-When a stage checkpoint is unavailable, an earlier checkpoint can be resumed
-with the extra `rescue_cache` input set to `RUN_ID:STAGE:SHARD:ATTEMPT` for the
-later stage's cache artifact. This adds that cache to the normal shard cache.
-The run log and artifact name contain the four numbers. A cache contains
+The `rescue_cache` input can add another cache to the selected shard cache.
+Use `RUN_ID:SHARD:ATTEMPT` for an earlier parallel shard, or
+`RUN_ID:STAGE:SHARD:ATTEMPT` for a stage cache. The run log and artifact name
+contain these numbers. This also allows an earlier checkpoint to benefit from
+a later stage cache when the later checkpoint is unavailable. A cache contains
 eligible compiler results, so other build work may need to run again.
 
 For a new build, supplying an earlier shard run ID skips the five shard jobs
