@@ -65,5 +65,6 @@ stricter compatibility checks above.
 
 On success, the workflow verifies the compiled feature flags, runs a headless
 browser smoke test, and uploads an unsigned Apple Silicon app ZIP and SHA-256
-checksum. The app is not notarized. The source browser tests still require a
-separate successful test build and run.
+checksum. It then attempts to save the final build checkpoint as well, so a
+later test build can reuse the output. The app is not notarized. The source
+browser tests still require a separate successful test build and run.
