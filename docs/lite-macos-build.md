@@ -32,9 +32,11 @@ set to 1–4 to start with an earlier target when needed. An interrupted phase
 continues in the next stage. Each stage saves its checkout and build output in up to sixteen 4 GiB
 compressed, SHA-256-verified volumes; the next stage restores those volumes.
 The full checkout is preserved so that incremental build metadata and source
-timestamps survive. Later stages reuse the already checked GN graph unless its
-arguments change or graph generation was interrupted. A shortage of disk space
-stops the workflow for inspection. Restore streams each volume from GitHub,
+timestamps survive, including subsecond file modification times in new
+checkpoints. Older checkpoints remain readable. Later stages reuse the already
+checked GN graph unless its arguments change or graph generation was
+interrupted. A shortage of disk space stops the workflow for inspection.
+Restore streams each volume from GitHub,
 checking its SHA-256 while extracting, so an extra complete local copy of the
 compressed checkpoint is not required. Each stage also uploads newly compiled
 C/C++ cache entries in up to four parts at about 2 GiB intervals or before

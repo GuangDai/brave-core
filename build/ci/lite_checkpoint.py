@@ -85,7 +85,7 @@ def save(workspace, destination, build_identity, volume_bytes=DEFAULT_VOLUME_BYT
 
     env = {**os.environ, "COPYFILE_DISABLE": "1"}
     tar = subprocess.Popen(
-        ["tar", "-C", str(workspace), "--exclude=./.lite-tools", "-cf", "-", "."],
+        ["tar", "--format=pax", "-C", str(workspace), "--exclude=./.lite-tools", "-cf", "-", "."],
         stdout=subprocess.PIPE,
         env=env,
     )
