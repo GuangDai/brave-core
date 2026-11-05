@@ -72,6 +72,13 @@ jobs:
           df -h "$GITHUB_WORKSPACE"
           pnpm run init --no-history --target_arch=arm64
 
+      - name: Verify Siso redirects wrapped compiler commands
+        working-directory: src/brave
+        run: |
+          LITE_SISO_TEST_BINARY="$GITHUB_WORKSPACE/src/third_party/siso/cipd/siso" \
+          LITE_CCACHE_TEST_BINARY="$(command -v ccache)" \
+            python3 build/ci/lite_siso_ccache_test.py -v
+
       - name: Download the previous shard cache
         id: seed_download
         if: inputs.seed_run_id != ''

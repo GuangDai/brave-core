@@ -185,6 +185,14 @@ jobs:
           mkdir -p "$TMPDIR"
           pnpm exec jest --runInBand --runTestsByPath build/commands/lib/gitPatcher.test.js
 
+      - name: Verify Siso redirects wrapped compiler commands
+        if: inputs.restore_stage == '0'
+        working-directory: src/brave
+        run: |
+          LITE_SISO_TEST_BINARY="$GITHUB_WORKSPACE/src/third_party/siso/cipd/siso" \
+          LITE_CCACHE_TEST_BINARY="$(command -v ccache)" \
+            python3 build/ci/lite_siso_ccache_test.py -v
+
       - name: Validate shard selection
         env:
           SHARDS_RUN: ${{ inputs.shards_run_id }}
