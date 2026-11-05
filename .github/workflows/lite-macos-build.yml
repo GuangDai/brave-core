@@ -1,0 +1,73 @@
+name: Brave Lite macOS build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [lite/v1.98.63]
+    paths: [.github/workflows/lite-macos-build.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 330
+    steps:
+      - name: Check out Brave Core
+        uses: actions/checkout@v4
+        with:
+          path: src/brave
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.16.0
+
+      - name: Set up pnpm
+        run: npm install --global pnpm@11.11.0
+
+      - name: Initialize a shallow Chromium checkout
+        working-directory: src/brave
+        run: |
+          df -h "$GITHUB_WORKSPACE"
+          pnpm run init --no-history --target_arch=arm64
+
+      - name: Build the browser
+        working-directory: src/brave
+        run: |
+          pnpm run build Static --target_arch=arm64 --skip_signing \
+            --gn=symbol_level:0 \
+            --gn=enable_brave_wallet:false \
+            --gn=enable_brave_rewards:false \
+            --gn=enable_brave_vpn_v1:false \
+            --gn=enable_brave_vpn_v2:false \
+            --gn=enable_ai_chat:false
+
+      - name: Package the app
+        shell: bash
+        run: |
+          set -euo pipefail
+          app=$(find "$GITHUB_WORKSPACE/src/out/Static" -maxdepth 1 -name '*.app' -type d -print -quit)
+          test -n "$app"
+          ditto -c -k --sequesterRsrc --keepParent "$app" "$RUNNER_TEMP/Brave-Lite-macOS-arm64.zip"
+          shasum -a 256 "$RUNNER_TEMP/Brave-Lite-macOS-arm64.zip" > "$RUNNER_TEMP/SHA256SUMS.txt"
+
+      - name: Upload the app
+        uses: actions/upload-artifact@v4
+        with:
+          name: Brave-Lite-macOS-arm64
+          path: |
+            ${{ runner.temp }}/Brave-Lite-macOS-arm64.zip
+            ${{ runner.temp }}/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Report disk usage
+        if: always()
+        shell: bash
+        run: |
+          df -h "$GITHUB_WORKSPACE"
+          du -sh "$GITHUB_WORKSPACE/src" "$GITHUB_WORKSPACE/src/out" 2>/dev/null || true
