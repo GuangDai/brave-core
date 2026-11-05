@@ -115,14 +115,16 @@ def stream_zip_member(stream, output, volume):
 
 
 def restore(workspace, manifest, build_identity, repository, run_id, attempt,
-            stage, token, api_url="https://api.github.com"):
+            stage, token, api_url="https://api.github.com", namespace="brave-lite"):
     if not attempt.isdigit() or not re.fullmatch(r"[1-8]", stage):
         raise ValueError("Invalid checkpoint stage or attempt")
+    if namespace not in ("brave-lite", "brave-lite-verify"):
+        raise ValueError("Invalid checkpoint namespace")
     workspace = workspace.resolve()
     lite_checkpoint.prepare_workspace(workspace)
     volumes = lite_checkpoint.validate_manifest(manifest, build_identity)
     available = artifacts(repository, run_id, token, api_url)
-    names = [f"brave-lite-s{stage}-a{attempt}-{item['name']}" for item in volumes]
+    names = [f"{namespace}-s{stage}-a{attempt}-{item['name']}" for item in volumes]
     if any(name not in available for name in names):
         raise RuntimeError("One or more checkpoint volume artifacts are unavailable")
 
@@ -161,11 +163,12 @@ def main():
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--attempt", required=True)
     parser.add_argument("--stage", required=True)
+    parser.add_argument("--namespace", choices=["brave-lite", "brave-lite-verify"], default="brave-lite")
     args = parser.parse_args()
     build_identity = lite_checkpoint.identity(args.repository, args.commit, args.workspace)
     restore(args.workspace, json.loads(args.manifest.read_text()), build_identity,
             args.repository, args.run_id, args.attempt, args.stage,
-            os.environ.get("GH_TOKEN", ""))
+            os.environ.get("GH_TOKEN", ""), namespace=args.namespace)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,35 @@
+name: Test isolated browser verification helpers
+
+on:
+  push:
+    branches: [ci/browser-verification]
+    paths:
+      - .github/workflows/lite-browser-verification.yml
+      - .github/workflows/lite-browser-verification-test.yml
+      - .github/actions/lite-browser-test-cache/**
+      - .github/lite-testing/**
+      - build/ci/lite_browser_checkpoint.py
+      - build/ci/lite_browser_checkpoint_test.py
+      - build/ci/lite_browser_verify.py
+      - build/ci/lite_browser_verify_test.py
+      - build/ci/lite_stream_checkpoint.py
+      - build/ci/lite_stream_namespace_test.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 32
+          persist-credentials: false
+      - name: Test test-list, result, checkpoint and overlay safeguards
+        run: |
+          python3 build/ci/lite_browser_verify_test.py -v
+          python3 build/ci/lite_browser_checkpoint_test.py -v
+          python3 build/ci/lite_stream_namespace_test.py -v
