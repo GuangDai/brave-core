@@ -9,14 +9,28 @@ on:
       target:
         required: true
         type: string
+      seed_run_id:
+        required: false
+        default: ''
+        type: string
+      seed_attempt:
+        required: false
+        default: '1'
+        type: string
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
   compile:
     runs-on: macos-26
     timeout-minutes: 355
+    env:
+      BRAVE_LITE_KEEP_BUILD_OUTPUT: '1'
+      pnpm_config_fetch_retries: '6'
+      pnpm_config_fetch_retry_mintimeout: '10000'
+      pnpm_config_fetch_retry_maxtimeout: '60000'
     steps:
       - name: Start the stage clock
         run: echo "LITE_JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
@@ -25,7 +39,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: src/brave
-          fetch-depth: 1
+          fetch-depth: 128
           persist-credentials: false
 
       - name: Set up Node.js
@@ -50,10 +64,6 @@ jobs:
           echo "CCACHE_REMOTE_STORAGE=file:$RUNNER_TEMP/lite-shard/cache" >> "$GITHUB_ENV"
           mkdir -p "$RUNNER_TEMP/lite-shard/cache"
 
-      - name: Install build dependencies
-        working-directory: src/brave
-        run: pnpm install --frozen-lockfile --yes
-
       - name: Initialize Chromium
         working-directory: src/brave
         run: |
@@ -62,52 +72,70 @@ jobs:
           df -h "$GITHUB_WORKSPACE"
           pnpm run init --no-history --target_arch=arm64
 
-      - name: Compile one target into its own cache
-        id: compile
-        working-directory: src/brave
-        env:
-          TARGET: ${{ inputs.target }}
-        run: |
-          python3 build/ci/lite_timebox.py \
-            --workspace "$GITHUB_WORKSPACE" --started "$LITE_JOB_STARTED" \
-            --budget-minutes 235 --reserve-gib 18 \
-            --cache-dir "$RUNNER_TEMP/lite-shard/cache" --cache-limit-gib 8 \
-            -- pnpm run build Static --target_arch=arm64 --skip_signing \
-            --target="$TARGET" --gn=symbol_level:0 --gn=cc_wrapper:ccache \
-            --gn=enable_brave_wallet:false \
-            --gn=enable_brave_rewards:false \
-            --gn=enable_brave_vpn_v1:false \
-            --gn=enable_brave_vpn_v2:false \
-            --gn=enable_ai_chat:false
-
-      - name: Report compiler cache usage
-        if: always() && steps.compile.outputs.outcome != ''
-        run: |
-          ccache --show-stats -v
-          df -h "$GITHUB_WORKSPACE"
-
-      - name: Record the shard's files and toolchain
-        id: manifest
-        if: always() && steps.compile.outputs.outcome != ''
-        working-directory: src/brave
-        env:
-          SHARD: ${{ inputs.shard }}
-          TARGET: ${{ inputs.target }}
-          OUTCOME: ${{ steps.compile.outputs.outcome }}
-          REASON: ${{ steps.compile.outputs.reason }}
-        run: |
-          python3 build/ci/lite_shard_cache.py save \
-            --root "$RUNNER_TEMP/lite-shard" --workspace "$GITHUB_WORKSPACE" \
-            --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA" \
-            --shard "$SHARD" --target "$TARGET" --outcome "$OUTCOME" --reason "$REASON"
-
-      - name: Upload this independent cache
-        if: always() && steps.manifest.outcome == 'success'
-        uses: actions/upload-artifact@v4
+      - name: Download the previous shard cache
+        id: seed_download
+        if: inputs.seed_run_id != ''
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
-          name: brave-lite-shard-${{ inputs.shard }}-a${{ github.run_attempt }}
-          path: ${{ runner.temp }}/lite-shard/
-          if-no-files-found: error
-          include-hidden-files: true
-          compression-level: 0
-          retention-days: 90
+          name: brave-lite-shard-${{ inputs.shard }}-a${{ inputs.seed_attempt }}
+          path: ${{ runner.temp }}/lite-seed/brave-lite-shard-${{ inputs.shard }}-a${{ inputs.seed_attempt }}
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.seed_run_id }}
+
+      - name: Seed the writable cache
+        if: steps.seed_download.outcome == 'success'
+        continue-on-error: true
+        working-directory: src/brave
+        env:
+          LITE_SHARD: ${{ inputs.shard }}
+          LITE_SEED_ATTEMPT: ${{ inputs.seed_attempt }}
+        run: |
+          python3 build/ci/lite_shard_cache.py verify-one \
+            --root "$RUNNER_TEMP/lite-seed" --workspace "$GITHUB_WORKSPACE" \
+            --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA" \
+            --attempt "$LITE_SEED_ATTEMPT" --shard "$LITE_SHARD" \
+            --seed-to "$RUNNER_TEMP/lite-shard/cache"
+
+      - name: Compile and save cache part 1
+        id: part1
+        uses: ./src/brave/.github/actions/lite-cache-phase
+        with:
+          shard: ${{ inputs.shard }}
+          target: ${{ inputs.target }}
+          part: '1'
+          budget: '85'
+          cache_limit: '2'
+
+      - name: Compile and save cache part 2
+        id: part2
+        if: steps.part1.outcome == 'success' && steps.part1.outputs.outcome == 'checkpoint' && (steps.part1.outputs.reason == 'time' || steps.part1.outputs.reason == 'cache')
+        uses: ./src/brave/.github/actions/lite-cache-phase
+        with:
+          shard: ${{ inputs.shard }}
+          target: ${{ inputs.target }}
+          part: '2'
+          budget: '135'
+          cache_limit: '4'
+
+      - name: Compile and save cache part 3
+        id: part3
+        if: steps.part2.outcome == 'success' && steps.part2.outputs.outcome == 'checkpoint' && (steps.part2.outputs.reason == 'time' || steps.part2.outputs.reason == 'cache')
+        uses: ./src/brave/.github/actions/lite-cache-phase
+        with:
+          shard: ${{ inputs.shard }}
+          target: ${{ inputs.target }}
+          part: '3'
+          budget: '185'
+          cache_limit: '6'
+
+      - name: Compile and save cache part 4
+        id: part4
+        if: steps.part3.outcome == 'success' && steps.part3.outputs.outcome == 'checkpoint' && (steps.part3.outputs.reason == 'time' || steps.part3.outputs.reason == 'cache')
+        uses: ./src/brave/.github/actions/lite-cache-phase
+        with:
+          shard: ${{ inputs.shard }}
+          target: ${{ inputs.target }}
+          part: '4'
+          budget: '235'
+          cache_limit: '8'

@@ -79,6 +79,21 @@ def verify_set(root, build_identity, attempt):
     return " ".join(verify_one(root, build_identity, attempt, shard) for shard in TARGETS)
 
 
+def seed_cache(root, attempt, shard, destination, limit_bytes=1024 ** 3):
+    source = root / f"brave-lite-shard-{shard}-a{attempt}" / "cache"
+    files = entries(source)
+    if sum(item["size"] for item in files) > limit_bytes:
+        raise RuntimeError("Previous cache exceeds the 1 GiB seed limit")
+    for item in files:
+        src = source / item["name"]
+        dst = destination / item["name"]
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if dst.exists():
+            raise RuntimeError(f"Seed destination already contains {item['name']}")
+        os.link(src, dst, follow_symlinks=False)
+    print(f"Seeded {len(files)} verified cache files", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("action", choices=["save", "verify-one", "verify-set"])
@@ -91,6 +106,8 @@ def main():
     parser.add_argument("--outcome")
     parser.add_argument("--reason", default="")
     parser.add_argument("--attempt")
+    parser.add_argument("--seed-to", type=Path,
+                        help="hard-link one verified cache into an empty writable cache")
     parser.add_argument("--portable", action="store_true",
                         help="allow a physical Mac without GitHub runner metadata")
     args = parser.parse_args()
@@ -103,7 +120,11 @@ def main():
             backend = verify_one(args.root, build_identity, args.attempt or "", args.shard)
         else:
             backend = verify_set(args.root, build_identity, args.attempt or "")
-        if output := os.environ.get("GITHUB_ENV"):
+        if args.seed_to:
+            if args.action != "verify-one":
+                parser.error("--seed-to requires verify-one")
+            seed_cache(args.root, args.attempt or "", args.shard, args.seed_to)
+        elif output := os.environ.get("GITHUB_ENV"):
             with open(output, "a", encoding="utf-8") as env:
                 env.write(f"CCACHE_REMOTE_STORAGE={backend}\nCCACHE_REMOTE_ONLY=true\n")
         else:

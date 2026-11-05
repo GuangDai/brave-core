@@ -23,21 +23,21 @@ on:
         description: Existing shard attempt (defaults to checkpoint attempt or 1)
         type: string
         default: ''
-  push:
-    branches: [lite/v1.98.63]
-    paths:
-      - .github/workflows/lite-macos-staged.yml
-      - .github/workflows/lite-macos-stage.yml
-      - .github/workflows/lite-macos-shard.yml
-      - build/ci/**
-
+      seed_run_id:
+        description: Earlier single-cache run to seed each parallel shard (up to 1 GiB per shard)
+        type: string
+        default: ''
+      seed_attempt:
+        description: Attempt of the earlier single-cache run
+        type: string
+        default: '1'
 permissions:
   actions: read
   contents: read
 
 jobs:
   shards:
-    if: github.event_name == 'push' || (inputs.shards_run_id == '' && inputs.resume_stage == '0')
+    if: inputs.shards_run_id == '' && inputs.resume_stage == '0'
     strategy:
       fail-fast: false
       matrix:
@@ -56,6 +56,8 @@ jobs:
     with:
       shard: ${{ matrix.shard }}
       target: ${{ matrix.target }}
+      seed_run_id: ${{ inputs.seed_run_id || '' }}
+      seed_attempt: ${{ inputs.seed_attempt || '1' }}
 
   stage1:
     needs: shards

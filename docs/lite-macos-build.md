@@ -10,21 +10,28 @@ some settings routes and resources may still be present in the binary. Existing
 saved data is not deleted. Browser tests cover the altered menu and feature
 gates; a successful build and test run are required to validate them.
 
-`Brave Lite macOS staged build` starts five macOS 26 runners to compile V8,
+Manually starting `Brave Lite macOS staged build` launches five macOS 26 runners to compile V8,
 Blink core, Blink modules, content, and browser targets. The targets share
 dependencies, so some work is duplicated. Each runner saves its own eligible
-C/C++ compiler results as an artifact when its target finishes, its time runs
-out, or its cache reaches approximately 8 GiB. The five artifacts can occupy
-around 40 GiB in total. The main build checks and reads one cache at a time,
+C/C++ compiler results in up to four artifacts, saving newly cached files at
+roughly 2 GiB intervals or before each time deadline. Each shard stops at about
+8 GiB; the five shards can occupy around 40 GiB in total. The main build checks
+and reads the available parts of one shard at a time,
 limiting disk use; its cache statistics show how much work was reused. Other
 build actions and final linking run separately.
+
+Clang modules and precompiled headers are disabled to make more compiler
+outputs eligible for ccache. This can make an initial compile slower; cache
+hit rate and total time must be measured on the real build.
 
 The main build uses at most eight successive stages. The first five try each
 target and its corresponding cache; the remaining stages build and link the
 browser. Each stage saves its checkout and build output in up to eight
 compressed, SHA-256-verified volumes; the next stage restores those volumes.
 The full checkout is preserved so that incremental build metadata and source
-timestamps survive. A shortage of disk space stops the workflow for inspection.
+timestamps survive. Later stages reuse the already checked GN graph unless its
+arguments change or graph generation was interrupted. A shortage of disk space
+stops the workflow for inspection.
 Artifacts are retained for up to 90 days. Actual build speed, artifact sizes and
 GitHub storage availability need to be measured on a full build.
 
@@ -41,6 +48,9 @@ and attempts to reuse the available caches, including caches saved after a
 failed compiler job. Missing shards do not prevent the later stages from
 running. Ccache checks compiler content, command arguments and inputs when
 deciding whether to reuse an object; changes may reduce the cache hit rate.
+Alternatively, supplying a seed run ID starts five new shard jobs and seeds
+each one from its corresponding earlier single-cache artifact, up to 1 GiB per
+shard. Missing, invalid or larger seed artifacts are skipped.
 
 If GitHub cannot finish the build, the cache artifacts can also be downloaded
 for a compatible Apple Silicon Mac. Preserve the artifact directories and use
@@ -49,7 +59,7 @@ the parent of the `src` checkout. From the Brave Core checkout, verify one cache
 and print the environment settings for it with:
 
 ```sh
-python3 build/ci/lite_shard_cache.py verify-one --portable \
+python3 build/ci/lite_cache_parts.py verify --portable \
   --root /path/to/downloaded-artifacts --workspace /path/to/workspace \
   --repository GuangDai/brave-core --commit "$(git rev-parse HEAD)" \
   --attempt 1 --shard 1
@@ -64,5 +74,6 @@ stricter compatibility checks above.
 
 On success, the workflow verifies the compiled feature flags, runs a headless
 browser smoke test, and uploads an unsigned Apple Silicon app ZIP and SHA-256
-checksum. The app is not notarized. The source browser tests still require a
-separate successful test build and run.
+checksum. It then attempts to save the final build checkpoint as well, so a
+later test build can reuse the output. The app is not notarized. The source
+browser tests still require a separate successful test build and run.

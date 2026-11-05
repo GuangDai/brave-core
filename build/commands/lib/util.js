@@ -21,7 +21,10 @@ import { getBuildArgs } from './buildArgs.ts'
 import { isCI, isTeamcity } from './ciDetect.ts'
 import * as buildDiagnostics from './buildDiagnostics.ts'
 import * as processUtil from './processUtil.ts'
-import { shouldCleanInterruptedBuild } from './interruptedBuild.js'
+import {
+  shouldCheckGnGraph,
+  shouldCleanInterruptedBuild,
+} from './interruptedBuild.js'
 
 // Do not limit the number of listeners to avoid warnings from EventEmitter.
 process.setMaxListeners(0)
@@ -486,7 +489,9 @@ const util = {
         path.join(outputDir, 'build.ninja'),
       )
       const hasBuildArgsUpdated = util.writeGnBuildArgs(outputDir, buildArgs)
-      const shouldCheck = isCI
+      const shouldCheck = shouldCheckGnGraph(
+        isCI, process.env.BRAVE_LITE_REUSE_GN === '1',
+      )
       const internalOpts = shouldCheck ? ['--check'] : []
 
       const shouldRunGnGen =

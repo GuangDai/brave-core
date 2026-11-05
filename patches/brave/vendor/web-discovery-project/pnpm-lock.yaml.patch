@@ -1,0 +1,34 @@
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -43,8 +43,8 @@
+         specifier: 1.7.5
+         version: 1.7.5
+       anonymous-credentials:
+-        specifier: https://github.com/human-web/anonymous-credentials/releases/download/1.0.0/anonymous-credentials-1.0.0.tgz
+-        version: https://github.com/human-web/anonymous-credentials/releases/download/1.0.0/anonymous-credentials-1.0.0.tgz
++        specifier: https://github.com/whotracksme/anonymous-credentials/releases/download/1.0.0/anonymous-credentials-1.0.0.tgz
++        version: https://github.com/whotracksme/anonymous-credentials/releases/download/1.0.0/anonymous-credentials-1.0.0.tgz
+       dexie:
+         specifier: 3.2.4
+         version: 3.2.4
+@@ -1347,8 +1347,8 @@
+     resolution: {integrity: sha512-S2Hw0TtNkMJhIabBwIojKL9YHO5T0n5eNqWJ7Lrlel/zDbftQpxpapi8tZs3X1HWa+u+QeydGmzzNU0m09+Rcg==}
+     engines: {node: '>=0.4.2'}
+ 
+-  anonymous-credentials@https://github.com/human-web/anonymous-credentials/releases/download/1.0.0/anonymous-credentials-1.0.0.tgz:
+-    resolution: {integrity: sha512-+l/KfYWJr8P9sqeyge/fd8wQF06XA3gXEptGuoDoDleMuYbf24ESCey/EZrgtY2kNphxw4CvYk3wU64pthJ5Og==, tarball: https://github.com/human-web/anonymous-credentials/releases/download/1.0.0/anonymous-credentials-1.0.0.tgz}
++  anonymous-credentials@https://github.com/whotracksme/anonymous-credentials/releases/download/1.0.0/anonymous-credentials-1.0.0.tgz:
++    resolution: {integrity: sha512-+l/KfYWJr8P9sqeyge/fd8wQF06XA3gXEptGuoDoDleMuYbf24ESCey/EZrgtY2kNphxw4CvYk3wU64pthJ5Og==, tarball: https://github.com/whotracksme/anonymous-credentials/releases/download/1.0.0/anonymous-credentials-1.0.0.tgz}
+     version: 1.0.0
+     engines: {node: '>=6.0.0'}
+ 
+@@ -5841,7 +5841,7 @@
+ 
+   amdefine@1.0.1: {}
+ 
+-  anonymous-credentials@https://github.com/human-web/anonymous-credentials/releases/download/1.0.0/anonymous-credentials-1.0.0.tgz:
++  anonymous-credentials@https://github.com/whotracksme/anonymous-credentials/releases/download/1.0.0/anonymous-credentials-1.0.0.tgz:
+     dependencies:
+       bindings: 1.5.0
+ 
