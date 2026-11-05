@@ -7,6 +7,12 @@ from pathlib import Path
 
 
 def next_phase(manifest, fallback, shared_assembly=False):
+    phase = manifest.get("build_phase", fallback)
+    # Old manifests did not record whether the target finished. Rechecking that
+    # target is incremental and also resumes work that was interrupted.
+    complete = manifest.get("phase_complete", False)
+    if type(phase) is not int or not 1 <= phase <= 8 or type(complete) is not bool:
+        raise ValueError("Invalid build phase metadata")
     if shared_assembly:
         if manifest.get("shared_complete") is not True:
             raise ValueError("Shared prerequisites are not complete")
@@ -15,12 +21,6 @@ def next_phase(manifest, fallback, shared_assembly=False):
             raise ValueError("Invalid shared assembly metadata")
         if not assembly_started:
             return 1
-    phase = manifest.get("build_phase", fallback)
-    # Old manifests did not record whether the target finished. Rechecking that
-    # target is incremental and also resumes work that was interrupted.
-    complete = manifest.get("phase_complete", False)
-    if type(phase) is not int or not 1 <= phase <= 8 or type(complete) is not bool:
-        raise ValueError("Invalid build phase metadata")
     return min(phase + int(complete), 8)
 
 

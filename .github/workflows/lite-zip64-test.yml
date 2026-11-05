@@ -1,0 +1,24 @@
+name: Test large streamed checkpoint boundary
+
+on:
+  push:
+    branches: [ci/shared-bootstrap]
+    paths:
+      - .github/workflows/lite-zip64-test.yml
+      - build/ci/lite_stream_checkpoint.py
+      - build/ci/lite_stream_checkpoint_test.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Stream a synthetic ZIP64 member at the 4 GiB boundary
+        run: LITE_LARGE_STREAM_TEST=1 python3 build/ci/lite_stream_checkpoint_test.py -v
