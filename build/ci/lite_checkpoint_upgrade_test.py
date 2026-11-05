@@ -56,6 +56,32 @@ class UpgradeTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'not verified'):
             upgrade.validate_patches(self.repo, chromium, [(self.patch, 'M')])
 
+    def test_translation_manager_upgrade_requires_matching_source(self):
+        patch = 'patches/components-translate-core-browser-translate_manager.cc.patch'
+        target = 'components/translate/core/browser/translate_manager.cc'
+        patch_path = self.repo / patch
+        patch_path.write_text('old patch')
+        git(self.repo, 'add', patch)
+        git(self.repo, 'commit', '-qm', 'add translation patch')
+        old = git(self.repo, 'rev-parse', 'HEAD')
+        patch_path.write_text('revised patch')
+        git(self.repo, 'commit', '-qam', 'revise translation patch')
+        changed = upgrade.validate_diff(self.repo, old, git(self.repo, 'rev-parse', 'HEAD'))
+        self.assertEqual(changed, [(patch, 'M')])
+
+        chromium = self.root / 'chromium'
+        target_path = chromium / target
+        target_path.parent.mkdir(parents=True)
+        target_path.write_text('patched translation source')
+        digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
+        info = {'schemaVersion': 1, 'patchChecksum': digest(patch_path),
+                'appliesTo': [{'path': target, 'checksum': digest(target_path)}]}
+        patch_path.with_suffix('.patchinfo').write_text(json.dumps(info))
+        upgrade.validate_patches(self.repo, chromium, changed)
+        target_path.write_text('unexpected translation source')
+        with self.assertRaisesRegex(RuntimeError, 'not verified'):
+            upgrade.validate_patches(self.repo, chromium, changed)
+
     def test_removed_patch_requires_original_source_and_no_metadata(self):
         target = upgrade.PATCH_TARGETS[self.patch]
         chromium = self.root / 'chromium'

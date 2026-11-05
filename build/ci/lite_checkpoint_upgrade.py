@@ -13,6 +13,7 @@ PATCH_TARGETS = {
     'patches/chrome-browser-password_manager-chrome_password_manager_client.cc.patch': 'chrome/browser/password_manager/chrome_password_manager_client.cc',
     'patches/components-autofill-core-common-autofill_prefs.cc.patch': 'components/autofill/core/common/autofill_prefs.cc',
     'patches/components-translate-core-browser-translate_prefs.cc.patch': 'components/translate/core/browser/translate_prefs.cc',
+    'patches/components-translate-core-browser-translate_manager.cc.patch': 'components/translate/core/browser/translate_manager.cc',
     'patches/chrome-browser-ui-autofill-chrome_autofill_client.cc.patch': 'chrome/browser/ui/autofill/chrome_autofill_client.cc',
     'patches/components-autofill-core-browser-foundations-browser_autofill_manager.cc.patch': 'components/autofill/core/browser/foundations/browser_autofill_manager.cc',
 }
