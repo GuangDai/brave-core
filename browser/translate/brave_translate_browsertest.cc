@@ -31,9 +31,11 @@
 #include "components/infobars/content/content_infobar_manager.h"
 #include "components/infobars/core/infobar.h"
 #include "components/prefs/pref_service.h"
+#include "components/translate/core/browser/language_state.h"
 #include "components/translate/core/browser/translate_download_manager.h"
 #include "components/translate/core/browser/translate_language_list.h"
 #include "components/translate/core/browser/translate_manager.h"
+#include "components/translate/core/browser/translate_metrics_logger.h"
 #include "components/translate/core/browser/translate_pref_names.h"
 #include "components/translate/core/browser/translate_prefs.h"
 #include "components/translate/core/browser/translate_script.h"
@@ -276,7 +278,37 @@ class BraveTranslateBrowserTest : public InProcessBrowserTest {
   std::string script_;
 };
 
+#if BUILDFLAG(IS_MAC)
+IN_PROC_BROWSER_TEST_F(BraveTranslateBrowserTest,
+                       ManualTranslationIsUnavailable) {
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(
+      browser(), embedded_test_server()->GetURL("/espanol_page.html")));
+
+  auto* manager = GetTranslateManager();
+  ASSERT_TRUE(manager);
+  auto* state = manager->GetLanguageState();
+  ASSERT_TRUE(state);
+  state->SetTranslationType(TranslationType::kUninitialized);
+  state->SetTranslateEnabled(false);
+  ASSERT_FALSE(state->translate_enabled());
+  ASSERT_FALSE(state->translation_pending());
+  ASSERT_FALSE(state->IsPageTranslated());
+
+  manager->ShowTranslateUI(false, true);
+  EXPECT_FALSE(state->translate_enabled());
+
+  manager->TranslatePage("es", "en", true,
+                         TranslationType::kManualContextMenuInitialTranslation);
+  EXPECT_EQ(TranslationType::kUninitialized, state->translation_type());
+  EXPECT_FALSE(state->translation_pending());
+  EXPECT_FALSE(state->IsPageTranslated());
+}
+#endif  // BUILDFLAG(IS_MAC)
+
 IN_PROC_BROWSER_TEST_F(BraveTranslateBrowserTest, InternalTranslation) {
+#if BUILDFLAG(IS_MAC)
+  GTEST_SKIP() << "Translation is disabled on macOS.";
+#endif
   ASSERT_TRUE(ui_test_utils::NavigateToURL(
       browser(), embedded_test_server()->GetURL("/espanol_page.html")));
   WaitUntilLanguageDetermined("es");
@@ -337,6 +369,9 @@ IN_PROC_BROWSER_TEST_F(BraveTranslateBrowserTest, InternalTranslation) {
 }
 
 IN_PROC_BROWSER_TEST_F(BraveTranslateBrowserTest, NoAutoTranslate) {
+#if BUILDFLAG(IS_MAC)
+  GTEST_SKIP() << "Translation is disabled on macOS.";
+#endif
   // Set auto translate from es to en.
   GetChromeTranslateClient()
       ->GetTranslatePrefs()
@@ -371,6 +406,9 @@ class BraveTranslateBrowserGoogleRedirectTest
 
 IN_PROC_BROWSER_TEST_F(BraveTranslateBrowserGoogleRedirectTest,
                        JsRedirectionsSelectivity) {
+#if BUILDFLAG(IS_MAC)
+  GTEST_SKIP() << "Translation is disabled on macOS.";
+#endif
   ASSERT_TRUE(ui_test_utils::NavigateToURL(
       browser(), embedded_test_server()->GetURL("/espanol_page.html")));
   WaitUntilLanguageDetermined("es");
