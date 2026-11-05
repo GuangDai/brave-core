@@ -30,6 +30,12 @@ class StageResultTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             lite_stage_result.summarize("", [{}])
 
+    def test_only_latest_part_upload_status_is_reported(self):
+        result = lite_stage_result.summarize("browser", [
+            {"outcome": "checkpoint", "saved": "false"},
+            {"outcome": "complete", "saved": "true"}])
+        self.assertEqual(result["cache_saved"], "true")
+
 
 if __name__ == "__main__":
     unittest.main()

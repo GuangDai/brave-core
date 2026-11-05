@@ -1,0 +1,287 @@
+name: Experimental shared-prerequisite macOS build
+
+on:
+  push:
+    branches: [ci/shared-bootstrap]
+    paths: [.github/workflows/lite-shared-build.yml]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Validate dispatch without starting a macOS build
+        type: boolean
+        default: false
+      resume_run_id:
+        description: Run containing a verified workspace checkpoint
+        type: string
+        required: true
+      resume_stage:
+        description: Checkpoint stage, 1–8
+        type: string
+        required: true
+      resume_attempt:
+        description: Checkpoint attempt
+        type: string
+        default: '1'
+      source_commit:
+        description: Original source commit recorded in the checkpoint
+        type: string
+        required: true
+      shards_run_id:
+        description: Earlier run containing compiler caches
+        type: string
+        required: true
+      shards_attempt:
+        description: Earlier cache attempt
+        type: string
+        default: '1'
+      rescue_cache:
+        description: Optional additional earlier compiler cache
+        type: string
+        default: ''
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  validate:
+    if: github.event_name == 'push' || inputs.dry_run
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'Shared build workflow is registered; no macOS build was started.'
+
+  bootstrap1:
+    if: github.event_name == 'workflow_dispatch' && !inputs.dry_run
+    uses: ./.github/workflows/lite-macos-stage.yml
+    with:
+      stage: 1
+      restore_stage: ${{ inputs.resume_stage }}
+      restore_run_id: ${{ inputs.resume_run_id }}
+      restore_attempt: ${{ inputs.resume_attempt || '1' }}
+      source_commit: ${{ inputs.source_commit }}
+      shards_run_id: ${{ inputs.shards_run_id }}
+      shards_attempt: ${{ inputs.shards_attempt || '1' }}
+      rescue_cache: ${{ inputs.rescue_cache || '' }}
+      shared_mode: bootstrap
+
+  bootstrap2:
+    needs: bootstrap1
+    if: needs.bootstrap1.result == 'success' && needs.bootstrap1.outputs.outcome == 'checkpoint' && (needs.bootstrap1.outputs.reason == 'time' || needs.bootstrap1.outputs.reason == 'cache')
+    uses: ./.github/workflows/lite-macos-stage.yml
+    with:
+      stage: 2
+      restore_stage: '1'
+      restore_run_id: ${{ format('{0}', github.run_id) }}
+      restore_attempt: ${{ needs.bootstrap1.outputs.attempt }}
+      source_commit: ${{ inputs.source_commit }}
+      shards_run_id: ${{ inputs.shards_run_id }}
+      shards_attempt: ${{ inputs.shards_attempt || '1' }}
+      rescue_cache: ${{ inputs.rescue_cache || '' }}
+      shared_mode: bootstrap
+
+  bootstrap3:
+    needs: bootstrap2
+    if: needs.bootstrap2.result == 'success' && needs.bootstrap2.outputs.outcome == 'checkpoint' && (needs.bootstrap2.outputs.reason == 'time' || needs.bootstrap2.outputs.reason == 'cache')
+    uses: ./.github/workflows/lite-macos-stage.yml
+    with:
+      stage: 3
+      restore_stage: '2'
+      restore_run_id: ${{ format('{0}', github.run_id) }}
+      restore_attempt: ${{ needs.bootstrap2.outputs.attempt }}
+      source_commit: ${{ inputs.source_commit }}
+      shards_run_id: ${{ inputs.shards_run_id }}
+      shards_attempt: ${{ inputs.shards_attempt || '1' }}
+      rescue_cache: ${{ inputs.rescue_cache || '' }}
+      shared_mode: bootstrap
+
+  bootstrap4:
+    needs: bootstrap3
+    if: needs.bootstrap3.result == 'success' && needs.bootstrap3.outputs.outcome == 'checkpoint' && (needs.bootstrap3.outputs.reason == 'time' || needs.bootstrap3.outputs.reason == 'cache')
+    uses: ./.github/workflows/lite-macos-stage.yml
+    with:
+      stage: 4
+      restore_stage: '3'
+      restore_run_id: ${{ format('{0}', github.run_id) }}
+      restore_attempt: ${{ needs.bootstrap3.outputs.attempt }}
+      source_commit: ${{ inputs.source_commit }}
+      shards_run_id: ${{ inputs.shards_run_id }}
+      shards_attempt: ${{ inputs.shards_attempt || '1' }}
+      rescue_cache: ${{ inputs.rescue_cache || '' }}
+      shared_mode: bootstrap
+
+  bootstrap5:
+    needs: bootstrap4
+    if: needs.bootstrap4.result == 'success' && needs.bootstrap4.outputs.outcome == 'checkpoint' && (needs.bootstrap4.outputs.reason == 'time' || needs.bootstrap4.outputs.reason == 'cache')
+    uses: ./.github/workflows/lite-macos-stage.yml
+    with:
+      stage: 5
+      restore_stage: '4'
+      restore_run_id: ${{ format('{0}', github.run_id) }}
+      restore_attempt: ${{ needs.bootstrap4.outputs.attempt }}
+      source_commit: ${{ inputs.source_commit }}
+      shards_run_id: ${{ inputs.shards_run_id }}
+      shards_attempt: ${{ inputs.shards_attempt || '1' }}
+      rescue_cache: ${{ inputs.rescue_cache || '' }}
+      shared_mode: bootstrap
+
+  bootstrap6:
+    needs: bootstrap5
+    if: needs.bootstrap5.result == 'success' && needs.bootstrap5.outputs.outcome == 'checkpoint' && (needs.bootstrap5.outputs.reason == 'time' || needs.bootstrap5.outputs.reason == 'cache')
+    uses: ./.github/workflows/lite-macos-stage.yml
+    with:
+      stage: 6
+      restore_stage: '5'
+      restore_run_id: ${{ format('{0}', github.run_id) }}
+      restore_attempt: ${{ needs.bootstrap5.outputs.attempt }}
+      source_commit: ${{ inputs.source_commit }}
+      shards_run_id: ${{ inputs.shards_run_id }}
+      shards_attempt: ${{ inputs.shards_attempt || '1' }}
+      rescue_cache: ${{ inputs.rescue_cache || '' }}
+      shared_mode: bootstrap
+
+  bootstrap7:
+    needs: bootstrap6
+    if: needs.bootstrap6.result == 'success' && needs.bootstrap6.outputs.outcome == 'checkpoint' && (needs.bootstrap6.outputs.reason == 'time' || needs.bootstrap6.outputs.reason == 'cache')
+    uses: ./.github/workflows/lite-macos-stage.yml
+    with:
+      stage: 7
+      restore_stage: '6'
+      restore_run_id: ${{ format('{0}', github.run_id) }}
+      restore_attempt: ${{ needs.bootstrap6.outputs.attempt }}
+      source_commit: ${{ inputs.source_commit }}
+      shards_run_id: ${{ inputs.shards_run_id }}
+      shards_attempt: ${{ inputs.shards_attempt || '1' }}
+      rescue_cache: ${{ inputs.rescue_cache || '' }}
+      shared_mode: bootstrap
+
+  bootstrap8:
+    needs: bootstrap7
+    if: needs.bootstrap7.result == 'success' && needs.bootstrap7.outputs.outcome == 'checkpoint' && (needs.bootstrap7.outputs.reason == 'time' || needs.bootstrap7.outputs.reason == 'cache')
+    uses: ./.github/workflows/lite-macos-stage.yml
+    with:
+      stage: 8
+      restore_stage: '7'
+      restore_run_id: ${{ format('{0}', github.run_id) }}
+      restore_attempt: ${{ needs.bootstrap7.outputs.attempt }}
+      source_commit: ${{ inputs.source_commit }}
+      shards_run_id: ${{ inputs.shards_run_id }}
+      shards_attempt: ${{ inputs.shards_attempt || '1' }}
+      rescue_cache: ${{ inputs.rescue_cache || '' }}
+      shared_mode: bootstrap
+
+  select_bootstrap:
+    needs: [bootstrap1, bootstrap2, bootstrap3, bootstrap4, bootstrap5, bootstrap6, bootstrap7, bootstrap8]
+    if: always() && github.event_name == 'workflow_dispatch' && !inputs.dry_run
+    runs-on: ubuntu-latest
+    outputs:
+      stage: ${{ steps.select.outputs.stage }}
+      attempt: ${{ steps.select.outputs.attempt }}
+    env:
+      RESULT_1: ${{ needs.bootstrap1.result }}
+      REASON_1: ${{ needs.bootstrap1.outputs.reason }}
+      ATTEMPT_1: ${{ needs.bootstrap1.outputs.attempt }}
+      RESULT_2: ${{ needs.bootstrap2.result }}
+      REASON_2: ${{ needs.bootstrap2.outputs.reason }}
+      ATTEMPT_2: ${{ needs.bootstrap2.outputs.attempt }}
+      RESULT_3: ${{ needs.bootstrap3.result }}
+      REASON_3: ${{ needs.bootstrap3.outputs.reason }}
+      ATTEMPT_3: ${{ needs.bootstrap3.outputs.attempt }}
+      RESULT_4: ${{ needs.bootstrap4.result }}
+      REASON_4: ${{ needs.bootstrap4.outputs.reason }}
+      ATTEMPT_4: ${{ needs.bootstrap4.outputs.attempt }}
+      RESULT_5: ${{ needs.bootstrap5.result }}
+      REASON_5: ${{ needs.bootstrap5.outputs.reason }}
+      ATTEMPT_5: ${{ needs.bootstrap5.outputs.attempt }}
+      RESULT_6: ${{ needs.bootstrap6.result }}
+      REASON_6: ${{ needs.bootstrap6.outputs.reason }}
+      ATTEMPT_6: ${{ needs.bootstrap6.outputs.attempt }}
+      RESULT_7: ${{ needs.bootstrap7.result }}
+      REASON_7: ${{ needs.bootstrap7.outputs.reason }}
+      ATTEMPT_7: ${{ needs.bootstrap7.outputs.attempt }}
+      RESULT_8: ${{ needs.bootstrap8.result }}
+      REASON_8: ${{ needs.bootstrap8.outputs.reason }}
+      ATTEMPT_8: ${{ needs.bootstrap8.outputs.attempt }}
+    steps:
+      - name: Select the completed shared checkpoint
+        id: select
+        shell: bash
+        run: |
+          for number in {1..8}; do
+            result="RESULT_$number"
+            reason="REASON_$number"
+            attempt="ATTEMPT_$number"
+            if [[ "${!result}" == success && "${!reason}" == next && "${!attempt}" =~ ^[0-9]+$ ]]; then
+              echo "stage=$number" >> "$GITHUB_OUTPUT"
+              echo "attempt=${!attempt}" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo '::error::Shared prerequisites did not finish; inspect the saved checkpoints and caches.'
+          exit 1
+
+  groups:
+    needs: select_bootstrap
+    strategy:
+      fail-fast: false
+      matrix:
+        group: ['1', '2', '3', '4', '5']
+    uses: ./.github/workflows/lite-shared-group.yml
+    with:
+      group: ${{ matrix.group }}
+      checkpoint_run_id: ${{ format('{0}', github.run_id) }}
+      checkpoint_stage: ${{ needs.select_bootstrap.outputs.stage }}
+      checkpoint_attempt: ${{ needs.select_bootstrap.outputs.attempt }}
+      source_commit: ${{ inputs.source_commit }}
+
+  assemble:
+    needs: [select_bootstrap, groups]
+    if: always() && needs.select_bootstrap.result == 'success' && (needs.groups.result == 'success' || needs.groups.result == 'failure')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Start assembly using the five saved group caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.ref_name }}
+          SOURCE_COMMIT: ${{ inputs.source_commit }}
+          BOOTSTRAP_STAGE: ${{ needs.select_bootstrap.outputs.stage }}
+          BOOTSTRAP_ATTEMPT: ${{ needs.select_bootstrap.outputs.attempt }}
+        shell: bash
+        run: |
+          [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          encoded=$(python3 -c 'import os, urllib.parse; print(urllib.parse.quote(os.environ["BRANCH"], safe=""))')
+          head=$(gh api "repos/$GITHUB_REPOSITORY/branches/$encoded" --jq '.commit.sha')
+          [[ "$head" == "$GITHUB_SHA" ]] || { echo '::error::Workflow branch changed; start assembly manually.'; exit 1; }
+          url=$(gh workflow run lite-macos-staged.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH" \
+            -f "resume_run_id=$GITHUB_RUN_ID" -f "resume_stage=$BOOTSTRAP_STAGE" \
+            -f "resume_attempt=$BOOTSTRAP_ATTEMPT" -f "resume_source_commit=$SOURCE_COMMIT" \
+            -f "shards_run_id=$GITHUB_RUN_ID" -f "shards_attempt=$GITHUB_RUN_ATTEMPT" \
+            -f start_phase=shared)
+          echo "$url"
+          run_id=${url##*/}
+          [[ "$run_id" =~ ^[0-9]+$ ]]
+          export ASSEMBLY_RUN_ID="$run_id"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          env = os.environ
+          data = {'repository': env['GITHUB_REPOSITORY'], 'parent_run': env['GITHUB_RUN_ID'],
+                  'run_id': env['ASSEMBLY_RUN_ID'], 'source_commit': env['SOURCE_COMMIT'],
+                  'bootstrap_stage': env['BOOTSTRAP_STAGE'], 'bootstrap_attempt': env['BOOTSTRAP_ATTEMPT']}
+          (Path(env['RUNNER_TEMP']) / 'assembly-dispatch.json').write_text(json.dumps(data, indent=2) + '\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        id: upload_dispatch
+        continue-on-error: true
+        with:
+          name: brave-lite-assembly-dispatch-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/assembly-dispatch.json
+          if-no-files-found: error
+          retention-days: 90
+      - uses: actions/upload-artifact@v4
+        if: steps.upload_dispatch.outcome == 'failure'
+        with:
+          name: brave-lite-assembly-dispatch-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/assembly-dispatch.json
+          if-no-files-found: error
+          retention-days: 90

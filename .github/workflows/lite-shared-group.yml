@@ -1,0 +1,194 @@
+name: macOS shared object group
+
+on:
+  workflow_call:
+    inputs:
+      group:
+        required: true
+        type: string
+      checkpoint_run_id:
+        required: true
+        type: string
+      checkpoint_stage:
+        required: true
+        type: string
+      checkpoint_attempt:
+        required: true
+        type: string
+      source_commit:
+        required: true
+        type: string
+    outputs:
+      outcome:
+        value: ${{ jobs.build.outputs.outcome }}
+      reason:
+        value: ${{ jobs.build.outputs.reason }}
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 355
+    env:
+      BRAVE_LITE_KEEP_BUILD_OUTPUT: '1'
+      BRAVE_LITE_REUSE_GN: '1'
+      LITE_SOURCE_COMMIT: ${{ inputs.source_commit }}
+    outputs:
+      outcome: ${{ steps.result.outputs.outcome }}
+      reason: ${{ steps.result.outputs.reason }}
+    steps:
+      - name: Start the group clock
+        env:
+          GROUP: ${{ inputs.group }}
+          CHECKPOINT_STAGE: ${{ inputs.checkpoint_stage }}
+          CHECKPOINT_RUN: ${{ inputs.checkpoint_run_id }}
+          CHECKPOINT_ATTEMPT: ${{ inputs.checkpoint_attempt }}
+        run: |
+          [[ "$GROUP" =~ ^[1-5]$ && "$CHECKPOINT_STAGE" =~ ^[1-8]$ ]]
+          [[ "$CHECKPOINT_RUN" =~ ^[0-9]+$ && "$CHECKPOINT_ATTEMPT" =~ ^[0-9]+$ ]]
+          [[ "$LITE_SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          echo "LITE_JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+      - name: Check out the current tools
+        uses: actions/checkout@v4
+        with:
+          path: .lite-tools
+          sparse-checkout: |
+            build/ci
+            .github/actions/lite-stage-cache-phase
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.16.0
+      - name: Set up pnpm and verified ccache
+        run: |
+          npm install --global pnpm@11.11.0
+          curl -fsSL https://github.com/ccache/ccache/releases/download/v4.14.2/ccache-4.14.2-darwin.tar.gz -o "$RUNNER_TEMP/ccache.tar.gz"
+          echo 'cf240009630b605b775c7c5c7b7105a3b196c79f31af322c1557969aa28003fc  '"$RUNNER_TEMP/ccache.tar.gz" | shasum -a 256 -c -
+          tar -xzf "$RUNNER_TEMP/ccache.tar.gz" -C "$RUNNER_TEMP"
+          mkdir -p "$RUNNER_TEMP/lite-stage-cache"
+          echo "$RUNNER_TEMP/ccache-4.14.2-darwin" >> "$GITHUB_PATH"
+          echo "CCACHE_DIR=$RUNNER_TEMP/ccache-stats" >> "$GITHUB_ENV"
+          echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          echo 'CCACHE_COMPILERCHECK=content' >> "$GITHUB_ENV"
+          echo 'CCACHE_REMOTE_ONLY=true' >> "$GITHUB_ENV"
+          echo "CCACHE_REMOTE_STORAGE=file:$RUNNER_TEMP/lite-stage-cache" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v4
+        with:
+          name: brave-lite-s${{ inputs.checkpoint_stage }}-a${{ inputs.checkpoint_attempt }}-manifest
+          path: ${{ runner.temp }}/manifest
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.checkpoint_run_id }}
+      - name: Restore the completed shared prerequisites
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHECKPOINT_STAGE: ${{ inputs.checkpoint_stage }}
+          CHECKPOINT_RUN: ${{ inputs.checkpoint_run_id }}
+          CHECKPOINT_ATTEMPT: ${{ inputs.checkpoint_attempt }}
+        run: |
+          python3 .lite-tools/build/ci/lite_stream_checkpoint.py --workspace "$GITHUB_WORKSPACE" \
+            --manifest "$RUNNER_TEMP/manifest/manifest.json" --repository "$GITHUB_REPOSITORY" \
+            --commit "$LITE_SOURCE_COMMIT" --run-id "$CHECKPOINT_RUN" \
+            --attempt "$CHECKPOINT_ATTEMPT" --stage "$CHECKPOINT_STAGE"
+          test "$(git -C src/brave rev-parse HEAD)" = "$LITE_SOURCE_COMMIT"
+          python3 .lite-tools/build/ci/lite_siso_config_verify.py --src "$GITHUB_WORKSPACE/src"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          manifest = json.loads((Path(os.environ['RUNNER_TEMP']) / 'manifest/manifest.json').read_text())
+          assert manifest.get('shared_complete') is True and manifest.get('shared_assembly') is False
+          PY
+          test -f "$GITHUB_WORKSPACE/src/out/Static_arm64/brave_lite_graph.ninja"
+          test -f "$GITHUB_WORKSPACE/src/out/Static_arm64/brave_lite_partitions.ninja"
+      - name: Compile and save group cache part 1
+        id: part1
+        uses: ./.lite-tools/.github/actions/lite-stage-cache-phase
+        with:
+          stage: ${{ inputs.group }}
+          shard: ${{ inputs.group }}
+          target: brave_lite_group_${{ inputs.group }}
+          ninja_file: brave_lite_graph.ninja
+          artifact_scope: shard
+          part: '1'
+          budget: '85'
+          cache_limit: '2'
+      - name: Compile and save group cache part 2
+        id: part2
+        if: steps.part1.outputs.outcome == 'checkpoint' && (steps.part1.outputs.reason == 'time' || steps.part1.outputs.reason == 'cache')
+        uses: ./.lite-tools/.github/actions/lite-stage-cache-phase
+        with:
+          stage: ${{ inputs.group }}
+          shard: ${{ inputs.group }}
+          target: brave_lite_group_${{ inputs.group }}
+          ninja_file: brave_lite_graph.ninja
+          artifact_scope: shard
+          part: '2'
+          budget: '145'
+          cache_limit: '4'
+      - name: Compile and save group cache part 3
+        id: part3
+        if: steps.part2.outputs.outcome == 'checkpoint' && (steps.part2.outputs.reason == 'time' || steps.part2.outputs.reason == 'cache')
+        uses: ./.lite-tools/.github/actions/lite-stage-cache-phase
+        with:
+          stage: ${{ inputs.group }}
+          shard: ${{ inputs.group }}
+          target: brave_lite_group_${{ inputs.group }}
+          ninja_file: brave_lite_graph.ninja
+          artifact_scope: shard
+          part: '3'
+          budget: '205'
+          cache_limit: '6'
+      - name: Compile and save group cache part 4
+        id: part4
+        if: steps.part3.outputs.outcome == 'checkpoint' && (steps.part3.outputs.reason == 'time' || steps.part3.outputs.reason == 'cache')
+        uses: ./.lite-tools/.github/actions/lite-stage-cache-phase
+        with:
+          stage: ${{ inputs.group }}
+          shard: ${{ inputs.group }}
+          target: brave_lite_group_${{ inputs.group }}
+          ninja_file: brave_lite_graph.ninja
+          artifact_scope: shard
+          part: '4'
+          budget: '265'
+          cache_limit: '8'
+      - name: Report group completion
+        id: result
+        if: always() && steps.part1.outcome != '' && steps.part1.outcome != 'skipped'
+        env:
+          LITE_BUILD_TARGET: brave_lite_group_${{ inputs.group }}
+          OUTCOME_1: ${{ steps.part1.outputs.outcome }}
+          OUTCOME_2: ${{ steps.part2.outputs.outcome }}
+          OUTCOME_3: ${{ steps.part3.outputs.outcome }}
+          OUTCOME_4: ${{ steps.part4.outputs.outcome }}
+          REASON_1: ${{ steps.part1.outputs.reason }}
+          REASON_2: ${{ steps.part2.outputs.reason }}
+          REASON_3: ${{ steps.part3.outputs.reason }}
+          REASON_4: ${{ steps.part4.outputs.reason }}
+          STATUS_1: ${{ steps.part1.outcome }}
+          STATUS_2: ${{ steps.part2.outcome }}
+          STATUS_3: ${{ steps.part3.outcome }}
+          STATUS_4: ${{ steps.part4.outcome }}
+          SAVED_1: ${{ steps.part1.outputs.cache_saved }}
+          SAVED_2: ${{ steps.part2.outputs.cache_saved }}
+          SAVED_3: ${{ steps.part3.outputs.cache_saved }}
+          SAVED_4: ${{ steps.part4.outputs.cache_saved }}
+        run: python3 .lite-tools/build/ci/lite_stage_result.py
+      - name: Require the latest cache part
+        if: always() && steps.result.outputs.compile_outcome != '' && steps.result.outputs.cache_saved != 'true'
+        run: |
+          echo '::error::The latest group cache part was not uploaded.'
+          exit 1
+      - name: Report a failed group
+        if: always() && steps.result.outputs.compile_outcome == 'failed'
+        run: |
+          echo '::error::Group compilation failed; uploaded cache parts remain available.'
+          exit 1
+      - name: Require the group to finish
+        if: always() && steps.result.outputs.reason != 'next'
+        run: |
+          echo '::error::The group did not finish; uploaded cache parts remain available.'
+          exit 1

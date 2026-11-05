@@ -1,0 +1,98 @@
+name: Test shared prerequisite handoff
+
+on:
+  push:
+    branches: [ci/shared-bootstrap]
+    paths:
+      - .github/workflows/lite-shared-handoff-test.yml
+      - build/ci/lite_shared_fixture.py
+      - build/ci/lite_checkpoint.py
+      - build/ci/lite_checkpoint_test.py
+      - build/ci/lite_stage_phase.py
+      - build/ci/lite_stage_phase_test.py
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  bootstrap:
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Prepare a synthetic graph and verified tools
+        run: |
+          python3 build/ci/lite_shared_fixture.py create --root "$GITHUB_WORKSPACE/fixture"
+          mkdir -p "$GITHUB_WORKSPACE/fixture/tools"
+          curl -fsSL 'https://chrome-infra-packages.appspot.com/client?platform=mac-arm64&version=git_revision:43615ea9acdcc6c1c213c5c7a30a568fdeb7c3dc' -o "$RUNNER_TEMP/cipd"
+          chmod +x "$RUNNER_TEMP/cipd"
+          printf '%s\n' 'build/siso/mac-arm64 git_revision:c574896b272b40aac6e44c228ee0b471ea7e3d7d' > "$RUNNER_TEMP/siso.ensure"
+          CIPD_CACHE_DIR="$RUNNER_TEMP/cipd-cache" "$RUNNER_TEMP/cipd" ensure \
+            -root "$GITHUB_WORKSPACE/fixture/tools/siso" -ensure-file "$RUNNER_TEMP/siso.ensure"
+          curl -fsSL https://github.com/ninja-build/ninja/releases/download/v1.13.2/ninja-mac.zip -o "$RUNNER_TEMP/ninja.zip"
+          echo 'c99048673aa765960a99cf10c6ddb9f1fad506099ff0a0e137ad8960a88f321b  '"$RUNNER_TEMP/ninja.zip" | shasum -a 256 -c -
+          unzip -q "$RUNNER_TEMP/ninja.zip" -d "$GITHUB_WORKSPACE/fixture/tools"
+      - name: Build the shared prerequisite and save the workspace
+        run: |
+          python3 build/ci/lite_stage_phase_test.py -v
+          python3 build/ci/lite_checkpoint_test.py -v
+          python3 build/ci/lite_shared_plan.py --ninja "$GITHUB_WORKSPACE/fixture/tools/ninja" \
+            --build "$GITHUB_WORKSPACE/fixture/out/Static" --report "$GITHUB_WORKSPACE/fixture/plan.json"
+          (cd fixture && tools/siso/siso ninja -C out/Static brave_lite_shared -k 1 \
+            -f brave_lite_shared.ninja --offline -cache_dir "$GITHUB_WORKSPACE/fixture/siso-cache")
+          python3 build/ci/lite_shared_fixture.py bootstrap --root "$GITHUB_WORKSPACE/fixture"
+          python3 build/ci/lite_shared_fixture.py timestamps --root "$GITHUB_WORKSPACE/fixture"
+          python3 build/ci/lite_checkpoint.py save --workspace "$GITHUB_WORKSPACE/fixture" \
+            --checkpoint "$RUNNER_TEMP/checkpoint" --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA"
+          python3 build/ci/lite_stage_phase.py record --manifest "$RUNNER_TEMP/checkpoint/manifest.json" \
+            --phase 5 --complete true --mode bootstrap
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brave-lite-s1-a${{ github.run_attempt }}-manifest
+          path: ${{ runner.temp }}/checkpoint/manifest.json
+          if-no-files-found: error
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brave-lite-s1-a${{ github.run_attempt }}-part-aa
+          path: ${{ runner.temp }}/checkpoint/part-aa
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  groups:
+    needs: bootstrap
+    runs-on: macos-26
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 5]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: brave-lite-s1-a${{ github.run_attempt }}-manifest
+          path: ${{ runner.temp }}/manifest
+      - name: Restore the shared workspace and build a group
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GROUP: ${{ matrix.group }}
+        run: |
+          python3 build/ci/lite_stream_checkpoint.py \
+            --workspace "$GITHUB_WORKSPACE/fixture" --manifest "$RUNNER_TEMP/manifest/manifest.json" \
+            --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA" \
+            --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --stage 1
+          [[ "$(python3 build/ci/lite_stage_phase.py next --manifest "$RUNNER_TEMP/manifest/manifest.json" \
+            --phase 5 --mode assembly)" == 1 ]]
+          python3 build/ci/lite_shared_fixture.py timestamps --root "$GITHUB_WORKSPACE/fixture"
+          (cd fixture && tools/siso/siso ninja -C out/Static "brave_lite_group_$GROUP" -k 1 -d explain \
+            -f brave_lite_graph.ninja --offline -cache_dir "$GITHUB_WORKSPACE/fixture/siso-cache")
+          if [[ -f fixture/out/Static/siso_explain ]]; then tail -n 80 fixture/out/Static/siso_explain; fi
+          python3 build/ci/lite_shared_fixture.py group --root "$GITHUB_WORKSPACE/fixture"

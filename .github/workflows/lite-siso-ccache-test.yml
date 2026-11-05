@@ -2,7 +2,7 @@ name: Test Siso source overrides with ccache
 
 on:
   push:
-    branches: [ci/streaming-checkpoints]
+    branches: [ci/streaming-checkpoints, ci/shared-bootstrap]
     paths:
       - .github/workflows/lite-siso-ccache-test.yml
       - build/config/siso/brave_siso_config.star

@@ -1,0 +1,37 @@
+name: Test automatic assembly dispatch
+
+on:
+  push:
+    branches: [ci/shared-bootstrap]
+    paths:
+      - .github/workflows/lite-dispatch-test.yml
+      - .github/workflows/lite-stream-checkpoint-test.yml
+      - .github/workflows/lite-shared-build.yml
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Dispatch a harmless workflow using the job token
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          url=$(gh workflow run lite-stream-checkpoint-test.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME")
+          echo "$url"
+          run_id=${url##*/}
+          [[ "$run_id" =~ ^[0-9]+$ ]]
+          for attempt in {1..40}; do
+            state=$(gh run view "$run_id" --repo "$GITHUB_REPOSITORY" --json status,conclusion --jq '[.status,.conclusion] | @tsv')
+            if [[ "$state" == $'completed\tsuccess' ]]; then exit 0; fi
+            if [[ "$state" == completed$'\t'* ]]; then echo "::error::Dispatched probe failed: $state"; exit 1; fi
+            sleep 5
+          done
+          echo '::error::Dispatched probe did not finish in time.'
+          exit 1

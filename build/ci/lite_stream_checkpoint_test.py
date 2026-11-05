@@ -6,6 +6,7 @@ import io
 import json
 import os
 from pathlib import Path
+import struct
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -24,6 +25,32 @@ class NonSeekable(io.BytesIO):
         raise io.UnsupportedOperation("not seekable")
 
 
+class Zip64ZeroStream:
+    def __init__(self, name, size):
+        name_bytes = name.encode()
+        extra = struct.pack('<HHQQ', 1, 16, size, size)
+        self.header = (struct.pack('<IHHHHHIIIHH', 0x04034B50, 45, 8, 0, 0, 0, 0,
+                                   0xFFFFFFFF, 0xFFFFFFFF, len(name_bytes), len(extra))
+                       + name_bytes + extra)
+        self.remaining = size
+
+    def read(self, size):
+        if self.header:
+            data, self.header = self.header[:size], self.header[size:]
+            return data
+        count = min(size, self.remaining)
+        self.remaining -= count
+        return b'\0' * count
+
+
+class CountingSink:
+    def __init__(self):
+        self.size = 0
+
+    def write(self, data):
+        self.size += len(data)
+
+
 def archive(name, data, method=zipfile.ZIP_STORED):
     buffer = NonSeekable()
     with zipfile.ZipFile(buffer, "w", compression=method) as output:
@@ -33,7 +60,7 @@ def archive(name, data, method=zipfile.ZIP_STORED):
 
 class StreamCheckpointTest(unittest.TestCase):
     def setUp(self):
-        test_root = Path(__file__).resolve().parents[2] / ".git" / "lite-validation"
+        test_root = Path(__file__).resolve().parents[2] / ".lite-validation"
         test_root.mkdir(parents=True, exist_ok=True)
         self.temp = tempfile.TemporaryDirectory(dir=test_root)
         self.addCleanup(self.temp.cleanup)
@@ -60,6 +87,19 @@ class StreamCheckpointTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "stored ZIP"):
             lite_stream_checkpoint.stream_zip_member(io.BytesIO(archive("part-aa", data, zipfile.ZIP_DEFLATED)),
                                                      io.BytesIO(), volume)
+
+    @unittest.skipUnless(os.environ.get('LITE_LARGE_STREAM_TEST') == '1',
+                         'Large streamed boundary test is run separately in CI')
+    def test_zip64_stored_member_at_four_gib_boundary(self):
+        size = 4 * 1024 ** 3
+        block = b'\0' * (8 * 1024 ** 2)
+        digest = hashlib.sha256()
+        for _ in range(size // len(block)):
+            digest.update(block)
+        volume = {'name': 'part-aa', 'size': size, 'sha256': digest.hexdigest()}
+        output = CountingSink()
+        lite_stream_checkpoint.stream_zip_member(Zip64ZeroStream('part-aa', size), output, volume)
+        self.assertEqual(output.size, size)
 
     def test_multivolume_restore_without_downloaded_archives(self):
         source = self.root / "source"

@@ -1,0 +1,52 @@
+name: Analyze shared browser build prerequisites
+
+on:
+  push:
+    branches: [ci/shared-bootstrap]
+    paths:
+      - .github/workflows/lite-shared-plan-test.yml
+      - build/ci/lite_partition_graph.py
+      - build/ci/lite_shared_plan.py
+      - build/ci/lite_shared_plan_test.py
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: lite-browser-ninja-graph
+          path: ${{ runner.temp }}/lite-graph
+          github-token: ${{ github.token }}
+          run-id: 42004688079
+      - name: Install verified Ninja and unpack the saved graph
+        run: |
+          curl -fsSL https://github.com/ninja-build/ninja/releases/download/v1.13.2/ninja-linux.zip -o "$RUNNER_TEMP/ninja.zip"
+          echo '5749cbc4e668273514150a80e387a957f933c6ed3f5f11e03fb30955e2bbead6  '"$RUNNER_TEMP/ninja.zip" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/lite-ninja" "$RUNNER_TEMP/lite-build" "$RUNNER_TEMP/shared-plan"
+          unzip -q "$RUNNER_TEMP/ninja.zip" -d "$RUNNER_TEMP/lite-ninja"
+          zstd -d -q -c "$RUNNER_TEMP/lite-graph/browser-ninja.tar.zst" | tar -C "$RUNNER_TEMP/lite-build" -xf -
+      - name: Test the planner
+        run: LITE_NINJA_TEST_BINARY="$RUNNER_TEMP/lite-ninja/ninja" python3 build/ci/lite_shared_plan_test.py -v
+      - name: Plan shared prerequisites and disjoint groups
+        run: |
+          python3 build/ci/lite_shared_plan.py \
+            --ninja "$RUNNER_TEMP/lite-ninja/ninja" --build "$RUNNER_TEMP/lite-build" \
+            --report "$RUNNER_TEMP/shared-plan/metrics.json"
+          cp "$RUNNER_TEMP/lite-build/brave_lite_shared.ninja" "$RUNNER_TEMP/shared-plan/"
+          cp "$RUNNER_TEMP/lite-build/brave_lite_partitions.ninja" "$RUNNER_TEMP/shared-plan/"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brave-lite-shared-build-plan
+          path: ${{ runner.temp }}/shared-plan/
+          if-no-files-found: error
+          retention-days: 90

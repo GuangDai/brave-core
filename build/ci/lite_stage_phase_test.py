@@ -23,6 +23,22 @@ class StagePhaseTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 lite_stage_phase.next_phase(manifest, 1)
 
+    def test_shared_bootstrap_begins_assembly_at_group_one(self):
+        partial = lite_stage_phase.record_phase({}, 5, False, "bootstrap")
+        with self.assertRaisesRegex(ValueError, "not complete"):
+            lite_stage_phase.next_phase(partial, 5, shared_assembly=True)
+        complete = lite_stage_phase.record_phase({}, 5, True, "bootstrap")
+        self.assertEqual(lite_stage_phase.next_phase(complete, 5, shared_assembly=True), 1)
+        self.assertEqual(lite_stage_phase.next_phase(complete, 5), 5)
+        with self.assertRaisesRegex(ValueError, "Invalid build phase"):
+            lite_stage_phase.next_phase({**complete, "build_phase": 9}, 5, shared_assembly=True)
+
+    def test_shared_assembly_resumes_or_advances_its_group(self):
+        partial = lite_stage_phase.record_phase({}, 2, False, "assembly")
+        complete = lite_stage_phase.record_phase({}, 2, True, "assembly")
+        self.assertEqual(lite_stage_phase.next_phase(partial, 1, shared_assembly=True), 2)
+        self.assertEqual(lite_stage_phase.next_phase(complete, 1, shared_assembly=True), 3)
+
 
 if __name__ == "__main__":
     unittest.main()
