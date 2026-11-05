@@ -18,7 +18,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: src/brave
-          fetch-depth: 1
+          fetch-depth: 128
           persist-credentials: false
 
       - name: Set up Node.js
@@ -75,6 +75,7 @@ jobs:
           pnpm run build Static --target_arch=arm64 --skip_signing \
             --gn=symbol_level:0 \
             --gn=cc_wrapper:ccache \
+            --gn=use_clang_modules:false --gn=enable_precompiled_headers:false \
             --gn=enable_brave_wallet:false \
             --gn=enable_brave_rewards:false \
             --gn=enable_brave_vpn_v1:false \

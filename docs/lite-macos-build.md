@@ -10,7 +10,7 @@ some settings routes and resources may still be present in the binary. Existing
 saved data is not deleted. Browser tests cover the altered menu and feature
 gates; a successful build and test run are required to validate them.
 
-`Brave Lite macOS staged build` starts five macOS 26 runners to compile V8,
+Manually starting `Brave Lite macOS staged build` launches five macOS 26 runners to compile V8,
 Blink core, Blink modules, content, and browser targets. The targets share
 dependencies, so some work is duplicated. Each runner saves its own eligible
 C/C++ compiler results in up to four artifacts, saving newly cached files at
@@ -19,6 +19,10 @@ roughly 2 GiB intervals or before each time deadline. Each shard stops at about
 and reads the available parts of one shard at a time,
 limiting disk use; its cache statistics show how much work was reused. Other
 build actions and final linking run separately.
+
+Clang modules and precompiled headers are disabled to make more compiler
+outputs eligible for ccache. This can make an initial compile slower; cache
+hit rate and total time must be measured on the real build.
 
 The main build uses at most eight successive stages. The first five try each
 target and its corresponding cache; the remaining stages build and link the

@@ -31,21 +31,13 @@ on:
         description: Attempt of the earlier single-cache run
         type: string
         default: '1'
-  push:
-    branches: [lite/v1.98.63]
-    paths:
-      - .github/workflows/lite-macos-staged.yml
-      - .github/workflows/lite-macos-stage.yml
-      - .github/workflows/lite-macos-shard.yml
-      - build/ci/**
-
 permissions:
   actions: read
   contents: read
 
 jobs:
   shards:
-    if: github.event_name == 'push' || (inputs.shards_run_id == '' && inputs.resume_stage == '0')
+    if: inputs.shards_run_id == '' && inputs.resume_stage == '0'
     strategy:
       fail-fast: false
       matrix:

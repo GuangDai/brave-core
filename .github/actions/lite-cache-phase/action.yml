@@ -45,6 +45,7 @@ runs:
           --cache-dir "$RUNNER_TEMP/lite-shard/cache" --cache-limit-gib "$CACHE_LIMIT" \
           -- pnpm run build Static --target_arch=arm64 --skip_signing \
           --target="$LITE_BUILD_TARGET" --gn=symbol_level:0 --gn=cc_wrapper:ccache \
+          --gn=use_clang_modules:false --gn=enable_precompiled_headers:false \
           --gn=enable_brave_wallet:false \
           --gn=enable_brave_rewards:false \
           --gn=enable_brave_vpn_v1:false \

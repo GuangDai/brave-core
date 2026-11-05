@@ -76,7 +76,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: src/brave
-          fetch-depth: 1
+          fetch-depth: 128
           persist-credentials: false
 
       - name: Check out checkpoint tools
@@ -244,6 +244,7 @@ jobs:
             --workspace "$GITHUB_WORKSPACE" --started "$LITE_JOB_STARTED" \
             -- "${args[@]}" \
             --gn=symbol_level:0 --gn=cc_wrapper:ccache \
+            --gn=use_clang_modules:false --gn=enable_precompiled_headers:false \
             --gn=enable_brave_wallet:false \
             --gn=enable_brave_rewards:false \
             --gn=enable_brave_vpn_v1:false \
