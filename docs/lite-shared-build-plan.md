@@ -15,11 +15,16 @@ bootstrap, versus 24,586 for the bootstrap and 25,922 across the groups after
 it. This is an estimate based on that graph, not a timing or a completed build.
 Siso can rewrite commands, and generated or non-C++ build work may still repeat.
 
-The intended next experiment is to build the shared target on one macOS runner,
-save its complete workspace, restore it on five compatible runners, and build
-one group per runner. Their compiler caches would then be used by the final
-browser build. The restore must preserve timestamps, build metadata, source
-revision, architecture, Xcode and SDK. This workflow is not integrated into the
-production build: test a real macOS checkpoint, Siso's alternate Ninja file,
-cache handoff, disk capacity and final linking before relying on it. The
-running build continues using the existing staged workflow.
+Run `42013502753` tested a small version on three macOS runners: one saved the
+shared prerequisite and two restored it, then each built its own group without
+repeating the prerequisite. Siso's alternate Ninja file and streamed
+checkpoint restore passed in that fixture.
+
+The intended next experiment is to build the real shared target, save its
+complete workspace, restore it on five compatible runners, and build one group
+per runner. Their compiler caches would then be used by the final browser build.
+The restore must preserve timestamps, build metadata, source revision,
+architecture, Xcode and SDK. This workflow is not integrated into the
+production build: test a real Chromium checkpoint, cache handoff, disk capacity
+and final linking before relying on it. The running build continues using the
+existing staged workflow.
