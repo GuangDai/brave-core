@@ -12,6 +12,14 @@ inputs:
     required: false
     default: ''
     description: Optional Ninja target
+  ninja_file:
+    required: false
+    default: ''
+    description: Optional generated shared-build Ninja file
+  artifact_scope:
+    required: false
+    default: stage
+    description: Stage or parallel shard cache naming
   part:
     required: true
     description: Cache part number
@@ -39,6 +47,7 @@ runs:
       working-directory: ${{ github.workspace }}/src/brave
       env:
         LITE_BUILD_TARGET: ${{ inputs.target }}
+        LITE_NINJA_FILE: ${{ inputs.ninja_file }}
         PART: ${{ inputs.part }}
         BUDGET: ${{ inputs.budget }}
         CACHE_LIMIT: ${{ inputs.cache_limit }}
@@ -46,6 +55,10 @@ runs:
         if [[ "$PART" != 1 ]]; then export BRAVE_LITE_REUSE_GN=1; fi
         args=(pnpm run build Static --target_arch=arm64 --skip_signing)
         if [[ -n "$LITE_BUILD_TARGET" ]]; then args+=(--target="$LITE_BUILD_TARGET"); fi
+        if [[ -n "$LITE_NINJA_FILE" ]]; then
+          [[ "$LITE_NINJA_FILE" == brave_lite_shared.ninja || "$LITE_NINJA_FILE" == brave_lite_graph.ninja ]]
+          args+=(--ninja="f:$LITE_NINJA_FILE")
+        fi
         python3 build/ci/lite_timebox.py \
           --workspace "$GITHUB_WORKSPACE" --started "$LITE_JOB_STARTED" \
           --budget-minutes "$BUDGET" --cache-dir "$RUNNER_TEMP/lite-stage-cache" \
@@ -72,6 +85,8 @@ runs:
         PART: ${{ inputs.part }}
         OUTCOME: ${{ steps.compile.outputs.outcome || (steps.compile.outcome == 'failure' && 'failed') }}
         REASON: ${{ steps.compile.outputs.reason }}
+        ACTUAL_TARGET: ${{ inputs.target }}
+        NINJA_FILE: ${{ inputs.ninja_file }}
       run: |
         if [[ -f "$RUNNER_TEMP/lite-stage-cache-state.json" ]]; then
           cp "$RUNNER_TEMP/lite-stage-cache-state.json" "$RUNNER_TEMP/lite-stage-cache-state-$PART.json"
@@ -82,6 +97,33 @@ runs:
           --workspace "$GITHUB_WORKSPACE" --repository "$GITHUB_REPOSITORY" \
           --commit "$LITE_SOURCE_COMMIT" --shard "$SHARD" --part "$PART" \
           --outcome "$OUTCOME" --reason "$REASON"
+        python3 - <<'PY'
+        import json
+        import os
+        from pathlib import Path
+        env = os.environ
+        path = Path(env['RUNNER_TEMP']) / f"lite-stage-cache-part-{env['PART']}" / 'manifest.json'
+        data = json.loads(path.read_text())
+        data['actual_build_target'] = env['ACTUAL_TARGET'] or 'brave'
+        data['ninja_file'] = env['NINJA_FILE'] or 'build.ninja'
+        path.write_text(json.dumps(data, separators=(',', ':')) + '\n')
+        PY
+
+    - name: Name this cache artifact
+      id: name
+      shell: bash
+      env:
+        SCOPE: ${{ inputs.artifact_scope }}
+        STAGE: ${{ inputs.stage }}
+        SHARD: ${{ inputs.shard }}
+        PART: ${{ inputs.part }}
+      run: |
+        case "$SCOPE" in
+          stage) name="brave-lite-stage-$STAGE-shard-$SHARD-part-$PART-a$GITHUB_RUN_ATTEMPT" ;;
+          shard) name="brave-lite-shard-$SHARD-part-$PART-a$GITHUB_RUN_ATTEMPT" ;;
+          *) echo '::error::Invalid cache artifact scope.'; exit 1 ;;
+        esac
+        echo "value=$name" >> "$GITHUB_OUTPUT"
 
     - name: Upload this cache part
       id: upload
@@ -89,7 +131,7 @@ runs:
       continue-on-error: true
       uses: actions/upload-artifact@v4
       with:
-        name: brave-lite-stage-${{ inputs.stage }}-shard-${{ inputs.shard }}-part-${{ inputs.part }}-a${{ github.run_attempt }}
+        name: ${{ steps.name.outputs.value }}
         path: ${{ runner.temp }}/lite-stage-cache-part-${{ inputs.part }}/
         if-no-files-found: error
         include-hidden-files: true
@@ -102,7 +144,7 @@ runs:
       continue-on-error: true
       uses: actions/upload-artifact@v4
       with:
-        name: brave-lite-stage-${{ inputs.stage }}-shard-${{ inputs.shard }}-part-${{ inputs.part }}-a${{ github.run_attempt }}
+        name: ${{ steps.name.outputs.value }}
         path: ${{ runner.temp }}/lite-stage-cache-part-${{ inputs.part }}/
         if-no-files-found: error
         include-hidden-files: true
