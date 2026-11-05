@@ -5,6 +5,10 @@ inputs:
   stage:
     description: Build stage number used in the artifact name
     required: true
+  artifact_name:
+    description: Optional distinct name for a synthetic test artifact
+    required: false
+    default: ''
 
 outputs:
   verification:
@@ -50,7 +54,7 @@ runs:
       continue-on-error: true
       uses: actions/upload-artifact@v4
       with:
-        name: Brave-Lite-macOS-arm64-stage-${{ inputs.stage }}
+        name: ${{ inputs.artifact_name || format('Brave-Lite-macOS-arm64-stage-{0}', inputs.stage) }}
         path: |
           ${{ runner.temp }}/Brave-Lite-macOS-arm64.zip
           ${{ runner.temp }}/BUILD_PROVENANCE.json
@@ -64,7 +68,7 @@ runs:
       continue-on-error: true
       uses: actions/upload-artifact@v4
       with:
-        name: Brave-Lite-macOS-arm64-stage-${{ inputs.stage }}
+        name: ${{ inputs.artifact_name || format('Brave-Lite-macOS-arm64-stage-{0}', inputs.stage) }}
         path: |
           ${{ runner.temp }}/Brave-Lite-macOS-arm64.zip
           ${{ runner.temp }}/BUILD_PROVENANCE.json
