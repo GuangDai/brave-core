@@ -34,6 +34,8 @@ jobs:
           echo 'CCACHE_COMPILERCHECK=content' >> "$GITHUB_ENV"
           echo 'CCACHE_REMOTE_ONLY=true' >> "$GITHUB_ENV"
           echo "CCACHE_REMOTE_STORAGE=file:$RUNNER_TEMP/lite-shard/cache" >> "$GITHUB_ENV"
+          echo "LITE_CLANG=$(xcrun --find clang)" >> "$GITHUB_ENV"
+          shasum -a 256 "$(xcrun --find clang)"
 
       - name: Compile one independent object
         env:
@@ -41,7 +43,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/lite-shard/cache"
           printf 'int lite_shard_%s(void) { return %s; }\n' "$SHARD" "$SHARD" > "$GITHUB_WORKSPACE/lite-shard-$SHARD.c"
-          ccache clang -c "$GITHUB_WORKSPACE/lite-shard-$SHARD.c" -o "$GITHUB_WORKSPACE/lite-shard-$SHARD.o"
+          ccache "$LITE_CLANG" -c "$GITHUB_WORKSPACE/lite-shard-$SHARD.c" -o "$GITHUB_WORKSPACE/lite-shard-$SHARD.o"
           ccache --show-stats -v
 
       - name: Record the cache with production validation code
@@ -83,6 +85,8 @@ jobs:
           echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
           echo 'CCACHE_COMPILERCHECK=content' >> "$GITHUB_ENV"
           echo 'CCACHE_REMOTE_ONLY=true' >> "$GITHUB_ENV"
+          echo "LITE_CLANG=$(xcrun --find clang)" >> "$GITHUB_ENV"
+          shasum -a 256 "$(xcrun --find clang)"
 
       - name: Download all shard caches
         uses: actions/download-artifact@v4
@@ -103,7 +107,7 @@ jobs:
           set -euo pipefail
           for shard in 1 2 3 4 5; do
             printf 'int lite_shard_%s(void) { return %s; }\n' "$shard" "$shard" > "$GITHUB_WORKSPACE/lite-shard-$shard.c"
-            ccache clang -c "$GITHUB_WORKSPACE/lite-shard-$shard.c" -o "$GITHUB_WORKSPACE/lite-shard-$shard.o"
+            ccache "$LITE_CLANG" -c "$GITHUB_WORKSPACE/lite-shard-$shard.c" -o "$GITHUB_WORKSPACE/lite-shard-$shard.o"
             nm "$GITHUB_WORKSPACE/lite-shard-$shard.o" | grep "_lite_shard_$shard"
           done
           ccache --show-stats -v
