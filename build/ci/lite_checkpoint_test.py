@@ -86,6 +86,23 @@ class CheckpointTest(unittest.TestCase):
         self.assertFalse(lite_checkpoint.compatible_identity(
             self.identity, {**newer, "macos_version": "27.0"}))
 
+    def test_portable_restore_requires_matching_toolchain_and_explicit_relocation(self):
+        (self.work / "object.o").write_bytes(b"compiled output")
+        lite_checkpoint.save(self.work, self.saved, self.identity, 100_000)
+        physical_mac = {**self.identity, "workspace": "/different/workspace",
+                        "image_os": "", "image_version": ""}
+        with self.assertRaisesRegex(RuntimeError, "toolchain differs"):
+            lite_checkpoint.restore(self.restored, self.saved, physical_mac, portable=True)
+        self.restored.rmdir()
+        with self.assertRaisesRegex(RuntimeError, "toolchain differs"):
+            lite_checkpoint.restore(self.restored, self.saved,
+                                    {**physical_mac, "sdk_version": "27"},
+                                    portable=True, allow_relocation=True)
+        self.restored.rmdir()
+        lite_checkpoint.restore(self.restored, self.saved, physical_mac,
+                                portable=True, allow_relocation=True)
+        self.assertEqual((self.restored / "object.o").read_bytes(), b"compiled output")
+
 
 if __name__ == "__main__":
     unittest.main()

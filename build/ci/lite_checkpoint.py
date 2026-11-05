@@ -52,9 +52,14 @@ def identity(repository, commit, workspace, require_runner=True):
     }
 
 
-def compatible_identity(saved, current):
-    required = ("repository", "commit", "workspace", "architecture", "image_os",
-                "xcode_version", "sdk_version")
+def compatible_identity(saved, current, portable=False, allow_relocation=False):
+    if allow_relocation and not portable:
+        raise ValueError("Workspace relocation requires portable restore")
+    required = ["repository", "commit", "architecture", "xcode_version", "sdk_version"]
+    if not portable:
+        required.append("image_os")
+    if not allow_relocation:
+        required.append("workspace")
     if not isinstance(saved, dict) or not all(
         key in saved and saved[key] == current.get(key) for key in required
     ):
@@ -112,12 +117,13 @@ def save(workspace, destination, build_identity, volume_bytes=DEFAULT_VOLUME_BYT
     print(f"Saved {len(volumes)} verified checkpoint volume(s)", flush=True)
 
 
-def validate_manifest(manifest, build_identity):
+def validate_manifest(manifest, build_identity, portable=False, allow_relocation=False):
     saved_identity = manifest.get("identity")
-    if manifest.get("version") != 1 or not compatible_identity(saved_identity, build_identity):
+    if (manifest.get("version") != 1
+            or not compatible_identity(saved_identity, build_identity, portable, allow_relocation)):
         raise RuntimeError("Checkpoint repository, commit or toolchain differs")
     if saved_identity != build_identity:
-        print("Runner image or macOS minor version changed; Xcode and SDK match", flush=True)
+        print("Checkpoint environment differs; required source and toolchain identity match", flush=True)
     volumes = manifest.get("volumes")
     if not isinstance(volumes, list) or not 1 <= len(volumes) <= MAX_VOLUMES:
         raise RuntimeError("Invalid checkpoint volume list")
@@ -137,13 +143,13 @@ def prepare_workspace(workspace):
         raise RuntimeError(f"Restore workspace is not empty: {unexpected}")
 
 
-def restore(workspace, source, build_identity):
+def restore(workspace, source, build_identity, portable=False, allow_relocation=False):
     workspace, source = workspace.resolve(), source.resolve()
     if source.is_relative_to(workspace):
         raise ValueError("Checkpoint source must be outside the workspace")
     prepare_workspace(workspace)
     manifest = json.loads((source / MANIFEST).read_text())
-    volumes = validate_manifest(manifest, build_identity)
+    volumes = validate_manifest(manifest, build_identity, portable, allow_relocation)
     paths = []
     for volume in volumes:
         expected_name = volume["name"]
@@ -167,6 +173,8 @@ def restore(workspace, source, build_identity):
     decompressor.stdout.close()
     check_pipeline([cat, decompressor, tar])
     print(f"Restored {len(paths)} verified checkpoint volume(s)", flush=True)
+    if allow_relocation:
+        print("Workspace moved; regenerate the GN graph before resuming the build", flush=True)
 
 
 def main():
@@ -176,12 +184,20 @@ def main():
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--repository", required=True)
     parser.add_argument("--commit", required=True)
+    parser.add_argument("--portable", action="store_true",
+                        help="restore on a compatible Mac outside GitHub Actions")
+    parser.add_argument("--allow-relocation", action="store_true",
+                        help="allow a different workspace path when restoring on a Mac")
     args = parser.parse_args()
-    build_identity = identity(args.repository, args.commit, args.workspace)
+    if (args.portable and args.action != "restore") or (args.allow_relocation and not args.portable):
+        parser.error("portable relocation is available only when restoring")
+    build_identity = identity(args.repository, args.commit, args.workspace,
+                              require_runner=not args.portable)
     if args.action == "save":
         save(args.workspace, args.checkpoint, build_identity)
     else:
-        restore(args.workspace, args.checkpoint, build_identity)
+        restore(args.workspace, args.checkpoint, build_identity,
+                portable=args.portable, allow_relocation=args.allow_relocation)
 
 
 if __name__ == "__main__":

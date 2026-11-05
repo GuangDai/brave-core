@@ -87,6 +87,23 @@ For a stage cache, put its downloaded directory under a separate root and
 rename it to `brave-lite-shard-SHARD-part-1-aATTEMPT` before using the same
 verification command with the shard and attempt from its artifact name.
 
+For a complete checkpoint, download its manifest and every volume listed in the
+manifest into one directory. On an Apple Silicon Mac with the same macOS major
+version, Xcode build and macOS SDK, an empty workspace can be restored with
+`zstd` installed:
+
+```sh
+python3 /path/to/current/brave-core/build/ci/lite_checkpoint.py restore --portable \
+  --workspace /path/to/empty/workspace --checkpoint /path/to/checkpoint \
+  --repository GuangDai/brave-core --commit SOURCE_COMMIT_FROM_MANIFEST
+```
+
+The default requires the original workspace path. Add `--allow-relocation` to
+restore elsewhere and regenerate GN before building: leave
+`BRAVE_LITE_REUSE_GN` unset. Relocation has passed a small fixture test; reuse
+of a complete Chromium build at a new path has yet to be validated. Keep the
+separate compiler-cache artifacts as well.
+
 On success, the workflow verifies the compiled feature flags, runs a headless
 browser smoke test, and uploads an unsigned Apple Silicon app ZIP and SHA-256
 checksum. It then attempts to save the final build checkpoint as well, so a
