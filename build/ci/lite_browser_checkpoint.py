@@ -14,8 +14,8 @@ import sys
 
 
 KIND = 'brave-lite-browser-verification-v1'
-SOURCE = '27eb2693ddf733af196a078740d01f8d2f1d1800'
-OVERLAY_COMMIT = 'b9531e4e93032b047a3d45531b60f8ecc24c1df6'
+SOURCE = '77a256e663e42784d80464ae5fa848dc93173c09'
+OVERLAY_COMMIT = '02274dfcd7adc358493dc7d1e035cdd962e092e4'
 OVERLAY_SHA256 = '5a90080662affaa9d21d7eed8a1d895aec1a44ab62947843e4cb74bd89bd9bde'
 # Each pair is the exact Git blob before and after applying the test-only patch.
 TEST_BLOBS = {
