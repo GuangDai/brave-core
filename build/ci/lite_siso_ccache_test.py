@@ -57,6 +57,8 @@ rule cxx
   command = ccache ../../third_party/llvm-build/Release+Asserts/bin/clang -c ../../base/example.cc -o example.o
 build example.o: cxx ../../base/example.cc
 ''')
+            (build / "brave_lite_shared.ninja").write_text(
+                "include build.ninja\nbuild brave_lite_shared: phony example.o\n")
             bin_dir = root / "bin"
             bin_dir.mkdir()
             (bin_dir / "ccache").symlink_to(Path(ccache).resolve())
@@ -68,7 +70,8 @@ build example.o: cxx ../../base/example.cc
             if not clang:
                 env["CCACHE_COMPILERTYPE"] = "gcc"
             command = [siso, "ninja", "-C", "out/Static", "-offline",
-                       "-cache_dir", str(root / "siso-cache"), "example.o"]
+                       "-cache_dir", str(root / "siso-cache"),
+                       "-f", "brave_lite_shared.ninja", "brave_lite_shared"]
             completed = subprocess.run(command, cwd=src, env=env, text=True,
                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             self.assertEqual(completed.returncode, 0, completed.stdout)
