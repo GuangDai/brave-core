@@ -1,0 +1,21 @@
+diff --git a/components/translate/core/browser/translate_prefs.cc b/components/translate/core/browser/translate_prefs.cc
+--- a/components/translate/core/browser/translate_prefs.cc
++++ b/components/translate/core/browser/translate_prefs.cc
+@@ -187,7 +187,7 @@
+ }
+ 
+ bool TranslatePrefs::IsOfferTranslateEnabled() const {
+-  return prefs_->GetBoolean(prefs::kOfferTranslateEnabled);
++  return !BUILDFLAG(IS_MAC) && prefs_->GetBoolean(prefs::kOfferTranslateEnabled);
+ }
+ 
+ bool TranslatePrefs::IsTranslateAllowedByPolicy() const {
+@@ -196,7 +196,7 @@
+   DCHECK(pref);
+   DCHECK(pref->GetValue()->is_bool());
+ 
+-  return pref->GetValue()->GetBool() || !pref->IsManaged();
++  return !BUILDFLAG(IS_MAC) && (pref->GetValue()->GetBool() || !pref->IsManaged());
+ }
+ 
+ void TranslatePrefs::SetCountry(std::string_view country) {

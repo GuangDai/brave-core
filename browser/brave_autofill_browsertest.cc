@@ -6,6 +6,7 @@
 #include "base/path_service.h"
 #include "brave/components/constants/brave_paths.h"
 #include "brave/components/constants/pref_names.h"
+#include "build/build_config.h"
 #include "chrome/browser/password_manager/chrome_password_manager_client.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/autofill/chrome_autofill_client.h"
@@ -13,6 +14,8 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/autofill/content/browser/content_autofill_driver.h"
 #include "components/autofill/core/browser/foundations/browser_autofill_manager.h"
+#include "components/autofill/core/common/autofill_prefs.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
@@ -55,6 +58,9 @@ class BraveAutofillBrowserTest : public InProcessBrowserTest {
     ChromePasswordManagerClient* client =
         ChromePasswordManagerClient::FromWebContents(active_contents);
     EXPECT_EQ(client->IsFillingEnabled(url::Origin::Create(url)), enabled);
+#if BUILDFLAG(IS_MAC)
+    EXPECT_FALSE(client->IsSavingAndFillingEnabled(url::Origin::Create(url)));
+#endif
     // Other info.
     autofill::ContentAutofillDriver* cross_driver =
         autofill::ContentAutofillDriver::GetForRenderFrameHost(
@@ -72,15 +78,22 @@ IN_PROC_BROWSER_TEST_F(BraveAutofillBrowserTest,
   // Disable autofill in private windows.
   browser()->GetProfile()->GetPrefs()->SetBoolean(kBraveAutofillPrivateWindows,
                                                   false);
-  TestAutofillInWindow(browser(), url, true);
+#if BUILDFLAG(IS_MAC)
+  auto* prefs = browser()->GetProfile()->GetPrefs();
+  prefs->SetBoolean(autofill::prefs::kAutofillProfileEnabled, true);
+  prefs->SetBoolean(autofill::prefs::kAutofillCreditCardEnabled, true);
+  EXPECT_FALSE(autofill::prefs::IsAutofillProfileEnabled(prefs));
+  EXPECT_FALSE(autofill::prefs::IsAutofillPaymentMethodsEnabled(prefs));
+#endif
+  TestAutofillInWindow(browser(), url, !BUILDFLAG(IS_MAC));
   BrowserWindowInterface* private_browser = CreateIncognitoBrowser(nullptr);
   TestAutofillInWindow(private_browser, url, false);
 
   // Enable autofill in private windows.
   browser()->GetProfile()->GetPrefs()->SetBoolean(kBraveAutofillPrivateWindows,
                                                   true);
-  TestAutofillInWindow(browser(), url, true);
-  TestAutofillInWindow(private_browser, url, true);
+  TestAutofillInWindow(browser(), url, !BUILDFLAG(IS_MAC));
+  TestAutofillInWindow(private_browser, url, !BUILDFLAG(IS_MAC));
 
   CloseBrowserSynchronously(private_browser);
 }

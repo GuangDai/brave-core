@@ -6,7 +6,7 @@
 import("//brave/components/brave_origin/buildflags/buildflags.gni")
 
 declare_args() {
-  enable_ai_chat = !is_brave_origin_branded
+  enable_ai_chat = !is_brave_origin_branded && !is_mac
 }
 
 declare_args() {

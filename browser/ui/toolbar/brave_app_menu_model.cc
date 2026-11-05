@@ -17,6 +17,7 @@
 #include "brave/browser/ui/toolbar/app_menu_icons.h"
 #include "brave/components/ai_chat/core/common/buildflags/buildflags.h"
 #include "brave/components/commander/common/buildflags/buildflags.h"
+#include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
@@ -105,6 +106,16 @@ void BraveAppMenuModel::Build() {
   BuildBrowserSection();
   BuildMoreToolsSubMenu();
   BuildPasswordsAndAutofillSubmenu();
+#if BUILDFLAG(IS_MAC)
+  if (const auto index =
+          GetIndexOfCommandId(kPasswordsAndAutofillMenuPlaceholder)) {
+    RemoveItemAt(*index);
+    if (IsCommandIdEnabled(IDC_SHOW_EMAIL_ALIASES)) {
+      InsertItemWithStringIdAt(*index, IDC_SHOW_EMAIL_ALIASES,
+                               IDS_SHOW_EMAIL_ALIASES);
+    }
+  }
+#endif
   BuildHelpSubMenu();
   BuildSaveAndShareSubmenu();
 

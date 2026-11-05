@@ -12,7 +12,11 @@ permissions:
 jobs:
   build:
     runs-on: macos-15
-    timeout-minutes: 330
+    timeout-minutes: 355
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.brave-ccache
+      CCACHE_MAXSIZE: 4G
+      CCACHE_SLOPPINESS: time_macros
     steps:
       - name: Check out Brave Core
         uses: actions/checkout@v4
@@ -35,25 +39,50 @@ jobs:
           df -h "$GITHUB_WORKSPACE"
           pnpm run init --no-history --target_arch=arm64
 
+      - name: Install the compiler cache
+        run: brew install ccache
+
+      - name: Restore compiler cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/.brave-ccache
+          key: brave-ccache-arm64-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: brave-ccache-arm64-v1-
+
       - name: Build the browser
+        id: compile
+        timeout-minutes: 230
         working-directory: src/brave
         run: |
           pnpm run build Static --target_arch=arm64 --skip_signing \
             --gn=symbol_level:0 \
+            --gn=cc_wrapper:ccache \
             --gn=enable_brave_wallet:false \
             --gn=enable_brave_rewards:false \
             --gn=enable_brave_vpn_v1:false \
             --gn=enable_brave_vpn_v2:false \
             --gn=enable_ai_chat:false
 
+      - name: Report compiler cache usage
+        if: always() && (steps.compile.outcome == 'success' || steps.compile.outcome == 'failure')
+        run: ccache --show-stats
+
+      - name: Save compiler cache
+        if: always() && (steps.compile.outcome == 'success' || steps.compile.outcome == 'failure')
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/.brave-ccache
+          key: brave-ccache-arm64-v1-${{ github.run_id }}-${{ github.run_attempt }}
+
       - name: Package the app
         shell: bash
         run: |
           set -euo pipefail
-          app=$(find "$GITHUB_WORKSPACE/src/out/Static" -maxdepth 1 -name '*.app' -type d -print -quit)
+          app=$(find "$GITHUB_WORKSPACE/src/out/Static_arm64" -maxdepth 1 -name '*.app' -type d -print -quit)
           test -n "$app"
           ditto -c -k --sequesterRsrc --keepParent "$app" "$RUNNER_TEMP/Brave-Lite-macOS-arm64.zip"
-          shasum -a 256 "$RUNNER_TEMP/Brave-Lite-macOS-arm64.zip" > "$RUNNER_TEMP/SHA256SUMS.txt"
+          (cd "$RUNNER_TEMP" && shasum -a 256 Brave-Lite-macOS-arm64.zip > SHA256SUMS.txt)
 
       - name: Upload the app
         uses: actions/upload-artifact@v4

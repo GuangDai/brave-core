@@ -16,6 +16,7 @@
 #include "brave/components/constants/brave_paths.h"
 #include "brave/components/constants/brave_services_key.h"
 #include "brave/components/translate/core/common/brave_translate_features.h"
+#include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/translate/translate_test_utils.h"
@@ -29,9 +30,12 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/infobars/content/content_infobar_manager.h"
 #include "components/infobars/core/infobar.h"
+#include "components/prefs/pref_service.h"
 #include "components/translate/core/browser/translate_download_manager.h"
 #include "components/translate/core/browser/translate_language_list.h"
 #include "components/translate/core/browser/translate_manager.h"
+#include "components/translate/core/browser/translate_pref_names.h"
+#include "components/translate/core/browser/translate_prefs.h"
 #include "components/translate/core/browser/translate_script.h"
 #include "components/translate/core/common/translate_util.h"
 #include "content/public/browser/web_contents.h"
@@ -97,6 +101,16 @@ constexpr char kXhrPromiseTemplate[] = R"(
   })
 )";
 }  // namespace
+
+#if BUILDFLAG(IS_MAC)
+IN_PROC_BROWSER_TEST_F(InProcessBrowserTest, TranslationIsUnavailable) {
+  auto* prefs = browser()->GetProfile()->GetPrefs();
+  prefs->SetBoolean(translate::prefs::kOfferTranslateEnabled, true);
+  TranslatePrefs translate_prefs(prefs);
+  EXPECT_FALSE(translate_prefs.IsOfferTranslateEnabled());
+  EXPECT_FALSE(translate_prefs.IsTranslateAllowedByPolicy());
+}
+#endif
 
 class BraveTranslateBrowserTest : public InProcessBrowserTest {
  public:

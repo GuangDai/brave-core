@@ -9,6 +9,7 @@ resources outside this repository, go to:
 
 ### Checking Out and Patching
 
+- [macOS Lite build](lite-macos-build.md) Fork-specific feature gates and CI.
 - [Upgrading Chromium](chromium_version_upgrade.md) Upgrading `brave-core` to a
   newer Chromium version.
 - [Patching with `plaster`](plaster.md) A patching engine for semantical

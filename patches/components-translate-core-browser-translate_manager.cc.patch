@@ -1,0 +1,19 @@
+diff --git a/components/translate/core/browser/translate_manager.cc b/components/translate/core/browser/translate_manager.cc
+--- a/components/translate/core/browser/translate_manager.cc
++++ b/components/translate/core/browser/translate_manager.cc
+@@ -322,6 +322,7 @@
+                                        std::optional<std::string> target_code,
+                                        bool auto_translate,
+                                        bool triggered_from_menu) {
++  if (BUILDFLAG(IS_MAC)) return;
+   // If a translation is in progress, do nothing.
+   if (language_state_.translation_pending()) {
+     return;
+@@ -373,6 +374,7 @@
+                                      std::string_view target_lang,
+                                      bool triggered_from_menu,
+                                      TranslationType translation_type) {
++  if (BUILDFLAG(IS_MAC)) return;
+   const GURL& page_url = translate_driver_->GetVisibleURL();
+   language_state_.SetTranslationType(translation_type);
+   // TODO(crbug.com/40898004): Very rarely, users can reach a state where this

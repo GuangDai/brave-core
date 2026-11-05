@@ -1,0 +1,12 @@
+diff --git a/chrome/browser/resources/settings/languages_page/languages_page.ts b/chrome/browser/resources/settings/languages_page/languages_page.ts
+--- a/chrome/browser/resources/settings/languages_page/languages_page.ts
++++ b/chrome/browser/resources/settings/languages_page/languages_page.ts
+@@ -232,7 +232,7 @@
+    */
+   protected isTranslationTarget_(languageCode: string, translateTarget: string):
+       string {
+-    if (convertLanguageCodeForTranslate(languageCode) === translateTarget) {
++    if (!navigator.platform.includes('Mac') && convertLanguageCodeForTranslate(languageCode) === translateTarget) {
+       return 'target';
+     } else {
+       return 'non-target';

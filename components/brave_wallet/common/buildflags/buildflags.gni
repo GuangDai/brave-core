@@ -6,7 +6,7 @@
 import("//brave/components/brave_origin/buildflags/buildflags.gni")
 
 declare_args() {
-  enable_brave_wallet = !is_brave_origin_branded
+  enable_brave_wallet = !is_brave_origin_branded && !is_mac
 
   # Enables unclocking wallet with passoword set by command line.
   # Only for dev builds.

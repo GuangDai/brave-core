@@ -1,8 +1,7 @@
 diff --git a/chrome/browser/ui/autofill/chrome_autofill_client.cc b/chrome/browser/ui/autofill/chrome_autofill_client.cc
-index 5220b34d64f6d89b611ccd882a24ebd94f808926..f6b4da3603d1f8b3ef326e58b51b318ec22619b8 100644
 --- a/chrome/browser/ui/autofill/chrome_autofill_client.cc
 +++ b/chrome/browser/ui/autofill/chrome_autofill_client.cc
-@@ -283,6 +283,12 @@ ui::ElementIdentifier GetElementId(AutofillClient::IphFeature iph_feature) {
+@@ -283,6 +283,12 @@
  // static
  void ChromeAutofillClient::CreateForWebContents(
      content::WebContents* web_contents) {
@@ -15,3 +14,20 @@ index 5220b34d64f6d89b611ccd882a24ebd94f808926..f6b4da3603d1f8b3ef326e58b51b318e
    DCHECK(web_contents);
    if (!FromWebContents(web_contents)) {
      web_contents->SetUserData(
+@@ -1020,6 +1026,7 @@
+ }
+ 
+ bool ChromeAutofillClient::IsAutofillEnabled() const {
++  if (BUILDFLAG(IS_MAC)) return false;
+   if (IsAutofillProfileEnabled() || AutofillClient::GetPaymentsAutofillClient()
+                                         ->IsAutofillPaymentMethodsEnabled()) {
+     return true;
+@@ -1077,7 +1084,7 @@
+ bool ChromeAutofillClient::IsPasswordManagerEnabled() const {
+   password_manager::PasswordManagerSettingsService* settings_service =
+       PasswordManagerSettingsServiceFactory::GetForProfile(GetProfile());
+-  return settings_service &&
++  return !BUILDFLAG(IS_MAC) && settings_service &&
+          settings_service->IsSettingEnabled(
+              password_manager::PasswordManagerSetting::kOfferToSavePasswords);
+ }
