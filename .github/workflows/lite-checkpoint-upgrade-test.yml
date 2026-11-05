@@ -1,0 +1,18 @@
+name: macOS checkpoint source upgrade test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  upgrade:
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Test checkpoint source identity and patch verification
+        run: python3 build/ci/lite_checkpoint_upgrade_test.py -v

@@ -1,0 +1,34 @@
+name: Resume saved macOS checkpoint 42010169603
+
+on:
+  push:
+    branches:
+      - ci/resume-checkpoint-42010169603
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  upgrade-test:
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Test checkpoint source identity and patch verification
+        run: python3 build/ci/lite_checkpoint_upgrade_test.py -v
+
+  staged:
+    needs: upgrade-test
+    uses: ./.github/workflows/lite-macos-staged.yml
+    with:
+      resume_stage: '1'
+      resume_run_id: '42010169603'
+      resume_attempt: '1'
+      resume_source_commit: '0ac016891784896ca1517df800a8364b5e964162'
+      upgrade_checkpoint_source: true
+      shards_run_id: '42002947765'
+      shards_attempt: '1'
+      rescue_cache: '42010169603:1:5:1'

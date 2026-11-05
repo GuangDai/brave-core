@@ -3,12 +3,11 @@
 This fork is based on Brave 1.98.63 and Chromium 156.0.8078.80. On macOS,
 Wallet, Rewards, VPN and Leo AI default to disabled at compile time.
 
-Chromium's Autofill, password manager and translation are shared components.
-Small Chromium patches disable their main filling and translation paths on
-macOS. The main menu entries and password manager WebUI are removed. Their code,
-some settings routes and resources may still be present in the binary. Existing
-saved data is not deleted. Browser tests cover the altered menu and feature
-gates; a successful build and test run are required to validate them.
+Chromium's translation is a shared component. Small Chromium patches disable its
+main translation paths on macOS, although some code, settings routes and
+resources may still be present in the binary. Autofill and the password manager
+retain their upstream Brave behavior. A successful build and browser tests are
+required to validate these changes.
 
 Manually starting `Brave Lite macOS staged build` launches five macOS 26 runners to compile V8,
 Blink core, Blink modules, content, and browser targets. The targets share

@@ -24,6 +24,12 @@ on:
       source_commit:
         required: true
         type: string
+      checkpoint_source_commit:
+        required: false
+        type: string
+      cache_source_commit:
+        required: false
+        type: string
       rescue_cache:
         required: false
         type: string
@@ -51,6 +57,8 @@ jobs:
       BRAVE_LITE_KEEP_BUILD_OUTPUT: '1'
       BRAVE_LITE_REUSE_GN: ${{ inputs.restore_stage != '0' && '1' || '0' }}
       LITE_SOURCE_COMMIT: ${{ inputs.source_commit }}
+      LITE_CHECKPOINT_SOURCE_COMMIT: ${{ inputs.checkpoint_source_commit || inputs.source_commit }}
+      LITE_CACHE_SOURCE_COMMIT: ${{ inputs.cache_source_commit || inputs.source_commit }}
       pnpm_config_fetch_retries: '6'
       pnpm_config_fetch_retry_mintimeout: '10000'
       pnpm_config_fetch_retry_maxtimeout: '60000'
@@ -64,6 +72,12 @@ jobs:
           RESTORE_STAGE: ${{ inputs.restore_stage }}
         run: |
           [[ "$LITE_SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$LITE_CHECKPOINT_SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$LITE_CACHE_SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          if [[ "$LITE_CHECKPOINT_SOURCE_COMMIT" != "$LITE_SOURCE_COMMIT" && ( "$RESTORE_STAGE" == 0 || "$LITE_SOURCE_COMMIT" != "$GITHUB_SHA" ) ]]; then
+            echo '::error::Source upgrade requires an existing checkpoint and the workflow commit.'
+            exit 1
+          fi
           if [[ "$RESTORE_STAGE" == '0' && "$LITE_SOURCE_COMMIT" != "$GITHUB_SHA" ]]; then
             echo '::error::A different source commit requires a saved checkpoint.'
             exit 1
@@ -147,9 +161,16 @@ jobs:
           python3 .lite-tools/build/ci/lite_stream_checkpoint.py \
             --workspace "$GITHUB_WORKSPACE" \
             --manifest "$RUNNER_TEMP/lite-restore-manifest/manifest.json" \
-            --repository "$GITHUB_REPOSITORY" --commit "$LITE_SOURCE_COMMIT" \
+            --repository "$GITHUB_REPOSITORY" --commit "$LITE_CHECKPOINT_SOURCE_COMMIT" \
             --run-id "$RESTORE_RUN" --attempt "$RESTORE_ATTEMPT" --stage "$RESTORE_STAGE"
-          test "$(git -C src/brave rev-parse HEAD)" = "$LITE_SOURCE_COMMIT"
+          test "$(git -C src/brave rev-parse HEAD)" = "$LITE_CHECKPOINT_SOURCE_COMMIT"
+
+      - name: Upgrade the restored checkpoint source
+        if: inputs.restore_stage != '0' && inputs.checkpoint_source_commit != '' && inputs.checkpoint_source_commit != inputs.source_commit
+        run: |
+          python3 .lite-tools/build/ci/lite_checkpoint_upgrade.py \
+            --workspace "$GITHUB_WORKSPACE" --repository "$GITHUB_REPOSITORY" \
+            --old "$LITE_CHECKPOINT_SOURCE_COMMIT" --new "$LITE_SOURCE_COMMIT"
 
       - name: Select this stage's target and cache
         id: selection
@@ -242,7 +263,7 @@ jobs:
         run: |
           GITHUB_ENV="$RUNNER_TEMP/lite-shard-env" python3 build/ci/lite_cache_parts.py verify \
             --root "$RUNNER_TEMP/lite-shard-parts" --workspace "$GITHUB_WORKSPACE" \
-            --repository "$GITHUB_REPOSITORY" --commit "$LITE_SOURCE_COMMIT" \
+            --repository "$GITHUB_REPOSITORY" --commit "$LITE_CACHE_SOURCE_COMMIT" \
             --attempt "$ATTEMPT" --shard "$SHARD"
           while IFS= read -r line; do
             case "$line" in
@@ -270,7 +291,7 @@ jobs:
         run: |
           python3 build/ci/lite_shard_cache.py verify-one \
             --root "$RUNNER_TEMP/lite-shards" --workspace "$GITHUB_WORKSPACE" \
-            --repository "$GITHUB_REPOSITORY" --commit "$LITE_SOURCE_COMMIT" \
+            --repository "$GITHUB_REPOSITORY" --commit "$LITE_CACHE_SOURCE_COMMIT" \
             --attempt "$SHARDS_ATTEMPT" --shard "$SHARD"
 
       - name: Continue without this missing cache

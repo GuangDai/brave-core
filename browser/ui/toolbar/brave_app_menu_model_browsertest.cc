@@ -22,7 +22,6 @@
 #include "brave/components/email_aliases/buildflags/buildflags.h"
 #include "brave/components/skus/common/features.h"
 #include "brave/components/tor/buildflags/buildflags.h"
-#include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_window.h"
@@ -169,16 +168,6 @@ IN_PROC_BROWSER_TEST_F(BraveAppMenuModelBrowserTest, CommandsExecutionTest) {
   RunCommandFromAppMenuModel(CreateIncognitoBrowser(),
                              IDC_EXTENSIONS_SUBMENU_MANAGE_EXTENSIONS);
 }
-
-#if BUILDFLAG(IS_MAC)
-IN_PROC_BROWSER_TEST_F(BraveAppMenuModelBrowserTest,
-                       PasswordsAndAutofillMenuIsAbsent) {
-  CheckCommandsAreDisabledInMenuModel(
-      browser(), {BraveAppMenuModel::kPasswordsAndAutofillMenuPlaceholder,
-                  IDC_SHOW_PASSWORD_MANAGER, IDC_SHOW_PAYMENT_METHODS,
-                  IDC_SHOW_CONTACT_INFO});
-}
-#endif
 
 // Test brave menu order test.
 // Brave menu is inserted based on corresponding commands enable status.
@@ -501,13 +490,6 @@ IN_PROC_BROWSER_TEST_P(BraveAppMenuModelBrowserTestForEmailAliases,
   BraveAppMenuModel model(browser_view->toolbar(), browser());
   model.Init();
 
-#if BUILDFLAG(IS_MAC)
-  EXPECT_FALSE(model.GetIndexOfCommandId(
-                        BraveAppMenuModel::kPasswordsAndAutofillMenuPlaceholder)
-                   .has_value());
-  EXPECT_EQ(IsEmailAliasesEnabled(),
-            model.GetIndexOfCommandId(IDC_SHOW_EMAIL_ALIASES).has_value());
-#else
   ui::SimpleMenuModel* autofill_menu_model =
       static_cast<ui::SimpleMenuModel*>(model.GetSubmenuModelAt(
           model
@@ -520,7 +502,6 @@ IN_PROC_BROWSER_TEST_P(BraveAppMenuModelBrowserTestForEmailAliases,
       autofill_menu_model->GetIndexOfCommandId(IDC_SHOW_EMAIL_ALIASES)
           .has_value();
   EXPECT_EQ(IsEmailAliasesEnabled(), present);
-#endif
 }
 
 INSTANTIATE_TEST_SUITE_P(All,

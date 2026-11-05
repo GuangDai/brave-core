@@ -5,7 +5,6 @@
 
 import {RegisterPolymerTemplateModifications, RegisterStyleOverride} from 'chrome://resources/brave/polymer_overriding.js'
 import {html} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js'
-import {isMac} from 'chrome://resources/js/platform.js'
 
 import {loadTimeData} from '../i18n_setup.js'
 import {pageVisibility} from './page_visibility.js'
@@ -343,9 +342,7 @@ RegisterPolymerTemplateModifications({
     // Move autofill to advanced
     const autofillEl = getMenuElement(templateContent, '/autofill')
     const languagesEl = getMenuElement(templateContent, '/languages')
-    if (autofillEl && isMac) {
-      autofillEl.remove()
-    } else if (autofillEl && languagesEl) {
+    if (autofillEl && languagesEl) {
       languagesEl.insertAdjacentElement('beforebegin', autofillEl)
     }
 

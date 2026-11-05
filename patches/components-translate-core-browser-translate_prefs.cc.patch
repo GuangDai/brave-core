@@ -6,7 +6,7 @@ diff --git a/components/translate/core/browser/translate_prefs.cc b/components/t
  
  bool TranslatePrefs::IsOfferTranslateEnabled() const {
 -  return prefs_->GetBoolean(prefs::kOfferTranslateEnabled);
-+  return !BUILDFLAG(IS_MAC) && prefs_->GetBoolean(prefs::kOfferTranslateEnabled);
++  return prefs_->GetBoolean(prefs::kOfferTranslateEnabled) && !BUILDFLAG(IS_MAC);
  }
  
  bool TranslatePrefs::IsTranslateAllowedByPolicy() const {
@@ -15,7 +15,7 @@ diff --git a/components/translate/core/browser/translate_prefs.cc b/components/t
    DCHECK(pref->GetValue()->is_bool());
  
 -  return pref->GetValue()->GetBool() || !pref->IsManaged();
-+  return !BUILDFLAG(IS_MAC) && (pref->GetValue()->GetBool() || !pref->IsManaged());
++  return (pref->GetValue()->GetBool() || !pref->IsManaged()) && !BUILDFLAG(IS_MAC);
  }
  
  void TranslatePrefs::SetCountry(std::string_view country) {

@@ -1,6 +1,41 @@
 name: Brave Lite macOS staged build
 
 on:
+  workflow_call:
+    inputs:
+      resume_run_id:
+        type: string
+        default: ''
+      resume_stage:
+        type: string
+        default: '0'
+      resume_attempt:
+        type: string
+        default: '1'
+      resume_source_commit:
+        type: string
+        default: ''
+      upgrade_checkpoint_source:
+        type: boolean
+        default: false
+      rescue_cache:
+        type: string
+        default: ''
+      start_phase:
+        type: string
+        default: '5'
+      shards_run_id:
+        type: string
+        default: ''
+      shards_attempt:
+        type: string
+        default: ''
+      seed_run_id:
+        type: string
+        default: ''
+      seed_attempt:
+        type: string
+        default: '1'
   workflow_dispatch:
     inputs:
       resume_run_id:
@@ -19,6 +54,10 @@ on:
         description: Source commit recorded in the checkpoint, if the workflow has changed
         type: string
         default: ''
+      upgrade_checkpoint_source:
+        description: Upgrade a restored checkpoint to the workflow commit using the reviewed patch migration
+        type: boolean
+        default: false
       rescue_cache:
         description: Extra cache in RUN_ID:SHARD:ATTEMPT or RUN_ID:STAGE:SHARD:ATTEMPT format
         type: string
@@ -80,7 +119,9 @@ jobs:
       restore_stage: ${{ inputs.resume_stage || '0' }}
       restore_run_id: ${{ inputs.resume_run_id || format('{0}', github.run_id) }}
       restore_attempt: ${{ inputs.resume_attempt || '1' }}
-      source_commit: ${{ inputs.resume_source_commit || github.sha }}
+      checkpoint_source_commit: ${{ inputs.resume_source_commit || github.sha }}
+      source_commit: ${{ (inputs.upgrade_checkpoint_source && github.sha) || inputs.resume_source_commit || github.sha }}
+      cache_source_commit: ${{ inputs.resume_source_commit || github.sha }}
       rescue_cache: ${{ inputs.rescue_cache || '' }}
       start_phase: ${{ inputs.start_phase || '5' }}
       shards_run_id: ${{ inputs.shards_run_id || (inputs.resume_stage != '' && inputs.resume_stage != '0' && inputs.resume_run_id) || format('{0}', github.run_id) }}
@@ -95,7 +136,8 @@ jobs:
       restore_stage: '1'
       restore_run_id: ${{ format('{0}', github.run_id) }}
       restore_attempt: ${{ needs.stage1.outputs.attempt }}
-      source_commit: ${{ inputs.resume_source_commit || github.sha }}
+      source_commit: ${{ (inputs.upgrade_checkpoint_source && github.sha) || inputs.resume_source_commit || github.sha }}
+      cache_source_commit: ${{ inputs.resume_source_commit || github.sha }}
       rescue_cache: ${{ inputs.rescue_cache || '' }}
       shards_run_id: ${{ inputs.shards_run_id || (inputs.resume_stage != '' && inputs.resume_stage != '0' && inputs.resume_run_id) || format('{0}', github.run_id) }}
       shards_attempt: ${{ (inputs.shards_run_id != '' && (inputs.shards_attempt || '1')) || (inputs.resume_stage != '' && inputs.resume_stage != '0' && inputs.resume_attempt) || format('{0}', github.run_attempt) }}
@@ -109,7 +151,8 @@ jobs:
       restore_stage: '2'
       restore_run_id: ${{ format('{0}', github.run_id) }}
       restore_attempt: ${{ needs.stage2.outputs.attempt }}
-      source_commit: ${{ inputs.resume_source_commit || github.sha }}
+      source_commit: ${{ (inputs.upgrade_checkpoint_source && github.sha) || inputs.resume_source_commit || github.sha }}
+      cache_source_commit: ${{ inputs.resume_source_commit || github.sha }}
       rescue_cache: ${{ inputs.rescue_cache || '' }}
       shards_run_id: ${{ inputs.shards_run_id || (inputs.resume_stage != '' && inputs.resume_stage != '0' && inputs.resume_run_id) || format('{0}', github.run_id) }}
       shards_attempt: ${{ (inputs.shards_run_id != '' && (inputs.shards_attempt || '1')) || (inputs.resume_stage != '' && inputs.resume_stage != '0' && inputs.resume_attempt) || format('{0}', github.run_attempt) }}
@@ -123,7 +166,8 @@ jobs:
       restore_stage: '3'
       restore_run_id: ${{ format('{0}', github.run_id) }}
       restore_attempt: ${{ needs.stage3.outputs.attempt }}
-      source_commit: ${{ inputs.resume_source_commit || github.sha }}
+      source_commit: ${{ (inputs.upgrade_checkpoint_source && github.sha) || inputs.resume_source_commit || github.sha }}
+      cache_source_commit: ${{ inputs.resume_source_commit || github.sha }}
       rescue_cache: ${{ inputs.rescue_cache || '' }}
       shards_run_id: ${{ inputs.shards_run_id || (inputs.resume_stage != '' && inputs.resume_stage != '0' && inputs.resume_run_id) || format('{0}', github.run_id) }}
       shards_attempt: ${{ (inputs.shards_run_id != '' && (inputs.shards_attempt || '1')) || (inputs.resume_stage != '' && inputs.resume_stage != '0' && inputs.resume_attempt) || format('{0}', github.run_attempt) }}
@@ -137,7 +181,8 @@ jobs:
       restore_stage: '4'
       restore_run_id: ${{ format('{0}', github.run_id) }}
       restore_attempt: ${{ needs.stage4.outputs.attempt }}
-      source_commit: ${{ inputs.resume_source_commit || github.sha }}
+      source_commit: ${{ (inputs.upgrade_checkpoint_source && github.sha) || inputs.resume_source_commit || github.sha }}
+      cache_source_commit: ${{ inputs.resume_source_commit || github.sha }}
       rescue_cache: ${{ inputs.rescue_cache || '' }}
       shards_run_id: ${{ inputs.shards_run_id || (inputs.resume_stage != '' && inputs.resume_stage != '0' && inputs.resume_run_id) || format('{0}', github.run_id) }}
       shards_attempt: ${{ (inputs.shards_run_id != '' && (inputs.shards_attempt || '1')) || (inputs.resume_stage != '' && inputs.resume_stage != '0' && inputs.resume_attempt) || format('{0}', github.run_attempt) }}
@@ -151,7 +196,8 @@ jobs:
       restore_stage: '5'
       restore_run_id: ${{ format('{0}', github.run_id) }}
       restore_attempt: ${{ needs.stage5.outputs.attempt }}
-      source_commit: ${{ inputs.resume_source_commit || github.sha }}
+      source_commit: ${{ (inputs.upgrade_checkpoint_source && github.sha) || inputs.resume_source_commit || github.sha }}
+      cache_source_commit: ${{ inputs.resume_source_commit || github.sha }}
       rescue_cache: ${{ inputs.rescue_cache || '' }}
       shards_run_id: ${{ inputs.shards_run_id || (inputs.resume_stage != '' && inputs.resume_stage != '0' && inputs.resume_run_id) || format('{0}', github.run_id) }}
       shards_attempt: ${{ (inputs.shards_run_id != '' && (inputs.shards_attempt || '1')) || (inputs.resume_stage != '' && inputs.resume_stage != '0' && inputs.resume_attempt) || format('{0}', github.run_attempt) }}
@@ -165,7 +211,8 @@ jobs:
       restore_stage: '6'
       restore_run_id: ${{ format('{0}', github.run_id) }}
       restore_attempt: ${{ needs.stage6.outputs.attempt }}
-      source_commit: ${{ inputs.resume_source_commit || github.sha }}
+      source_commit: ${{ (inputs.upgrade_checkpoint_source && github.sha) || inputs.resume_source_commit || github.sha }}
+      cache_source_commit: ${{ inputs.resume_source_commit || github.sha }}
       rescue_cache: ${{ inputs.rescue_cache || '' }}
       shards_run_id: ${{ inputs.shards_run_id || (inputs.resume_stage != '' && inputs.resume_stage != '0' && inputs.resume_run_id) || format('{0}', github.run_id) }}
       shards_attempt: ${{ (inputs.shards_run_id != '' && (inputs.shards_attempt || '1')) || (inputs.resume_stage != '' && inputs.resume_stage != '0' && inputs.resume_attempt) || format('{0}', github.run_attempt) }}
@@ -179,7 +226,8 @@ jobs:
       restore_stage: '7'
       restore_run_id: ${{ format('{0}', github.run_id) }}
       restore_attempt: ${{ needs.stage7.outputs.attempt }}
-      source_commit: ${{ inputs.resume_source_commit || github.sha }}
+      source_commit: ${{ (inputs.upgrade_checkpoint_source && github.sha) || inputs.resume_source_commit || github.sha }}
+      cache_source_commit: ${{ inputs.resume_source_commit || github.sha }}
       rescue_cache: ${{ inputs.rescue_cache || '' }}
       shards_run_id: ${{ inputs.shards_run_id || (inputs.resume_stage != '' && inputs.resume_stage != '0' && inputs.resume_run_id) || format('{0}', github.run_id) }}
       shards_attempt: ${{ (inputs.shards_run_id != '' && (inputs.shards_attempt || '1')) || (inputs.resume_stage != '' && inputs.resume_stage != '0' && inputs.resume_attempt) || format('{0}', github.run_attempt) }}

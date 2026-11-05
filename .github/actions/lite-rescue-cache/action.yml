@@ -107,7 +107,7 @@ runs:
         from lite_cache_parts import verify
         from lite_checkpoint import identity
         env = os.environ
-        current = identity(env['GITHUB_REPOSITORY'], env['LITE_SOURCE_COMMIT'], Path(env['GITHUB_WORKSPACE']))
+        current = identity(env['GITHUB_REPOSITORY'], env.get('LITE_CACHE_SOURCE_COMMIT', env['LITE_SOURCE_COMMIT']), Path(env['GITHUB_WORKSPACE']))
         backends = verify(Path(env['RUNNER_TEMP']) / 'lite-rescue', current,
                           env['RESCUE_SHARD'], env['RESCUE_ATTEMPT'])
         if not backends:
