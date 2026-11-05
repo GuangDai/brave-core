@@ -24,7 +24,7 @@ def digest(path):
     return result.hexdigest()
 
 
-def identity(repository, commit):
+def identity(repository, commit, workspace):
     if platform.system() != "Darwin":
         raise RuntimeError("The build checkpoint requires a macOS runner")
     if not repository or not commit:
@@ -35,6 +35,7 @@ def identity(repository, commit):
     return {
         "repository": repository,
         "commit": commit,
+        "workspace": str(workspace.resolve()),
         "architecture": platform.machine(),
         "image_os": os.environ.get("ImageOS", ""),
         "image_version": image_version,
@@ -147,7 +148,7 @@ def main():
     parser.add_argument("--repository", required=True)
     parser.add_argument("--commit", required=True)
     args = parser.parse_args()
-    build_identity = identity(args.repository, args.commit)
+    build_identity = identity(args.repository, args.commit, args.workspace)
     if args.action == "save":
         save(args.workspace, args.checkpoint, build_identity)
     else:

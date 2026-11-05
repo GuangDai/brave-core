@@ -1,0 +1,141 @@
+name: Brave Lite macOS staged build
+
+on:
+  workflow_dispatch:
+    inputs:
+      resume_run_id:
+        description: Run ID containing a checkpoint from the same commit
+        type: string
+        default: ''
+      resume_stage:
+        description: Checkpoint stage (0 starts from scratch, otherwise 1–8)
+        type: string
+        default: '0'
+      resume_attempt:
+        description: Attempt that uploaded the checkpoint
+        type: string
+        default: '1'
+  push:
+    branches: [lite/v1.98.63]
+    paths:
+      - .github/workflows/lite-macos-staged.yml
+      - .github/workflows/lite-macos-stage.yml
+      - build/ci/**
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  stage1:
+    uses: ./.github/workflows/lite-macos-stage.yml
+    with:
+      stage: 1
+      restore_stage: ${{ inputs.resume_stage || '0' }}
+      restore_run_id: ${{ inputs.resume_run_id || format('{0}', github.run_id) }}
+      restore_attempt: ${{ inputs.resume_attempt || '1' }}
+
+  stage2:
+    needs: stage1
+    if: needs.stage1.result == 'success' && needs.stage1.outputs.outcome == 'checkpoint' && needs.stage1.outputs.reason == 'time'
+    uses: ./.github/workflows/lite-macos-stage.yml
+    with:
+      stage: 2
+      restore_stage: '1'
+      restore_run_id: ${{ format('{0}', github.run_id) }}
+      restore_attempt: ${{ needs.stage1.outputs.attempt }}
+
+  stage3:
+    needs: stage2
+    if: needs.stage2.result == 'success' && needs.stage2.outputs.outcome == 'checkpoint' && needs.stage2.outputs.reason == 'time'
+    uses: ./.github/workflows/lite-macos-stage.yml
+    with:
+      stage: 3
+      restore_stage: '2'
+      restore_run_id: ${{ format('{0}', github.run_id) }}
+      restore_attempt: ${{ needs.stage2.outputs.attempt }}
+
+  stage4:
+    needs: stage3
+    if: needs.stage3.result == 'success' && needs.stage3.outputs.outcome == 'checkpoint' && needs.stage3.outputs.reason == 'time'
+    uses: ./.github/workflows/lite-macos-stage.yml
+    with:
+      stage: 4
+      restore_stage: '3'
+      restore_run_id: ${{ format('{0}', github.run_id) }}
+      restore_attempt: ${{ needs.stage3.outputs.attempt }}
+
+  stage5:
+    needs: stage4
+    if: needs.stage4.result == 'success' && needs.stage4.outputs.outcome == 'checkpoint' && needs.stage4.outputs.reason == 'time'
+    uses: ./.github/workflows/lite-macos-stage.yml
+    with:
+      stage: 5
+      restore_stage: '4'
+      restore_run_id: ${{ format('{0}', github.run_id) }}
+      restore_attempt: ${{ needs.stage4.outputs.attempt }}
+
+  stage6:
+    needs: stage5
+    if: needs.stage5.result == 'success' && needs.stage5.outputs.outcome == 'checkpoint' && needs.stage5.outputs.reason == 'time'
+    uses: ./.github/workflows/lite-macos-stage.yml
+    with:
+      stage: 6
+      restore_stage: '5'
+      restore_run_id: ${{ format('{0}', github.run_id) }}
+      restore_attempt: ${{ needs.stage5.outputs.attempt }}
+
+  stage7:
+    needs: stage6
+    if: needs.stage6.result == 'success' && needs.stage6.outputs.outcome == 'checkpoint' && needs.stage6.outputs.reason == 'time'
+    uses: ./.github/workflows/lite-macos-stage.yml
+    with:
+      stage: 7
+      restore_stage: '6'
+      restore_run_id: ${{ format('{0}', github.run_id) }}
+      restore_attempt: ${{ needs.stage6.outputs.attempt }}
+
+  stage8:
+    needs: stage7
+    if: needs.stage7.result == 'success' && needs.stage7.outputs.outcome == 'checkpoint' && needs.stage7.outputs.reason == 'time'
+    uses: ./.github/workflows/lite-macos-stage.yml
+    with:
+      stage: 8
+      restore_stage: '7'
+      restore_run_id: ${{ format('{0}', github.run_id) }}
+      restore_attempt: ${{ needs.stage7.outputs.attempt }}
+
+  result:
+    needs: [stage1, stage2, stage3, stage4, stage5, stage6, stage7, stage8]
+    if: always()
+    runs-on: ubuntu-latest
+    env:
+      RESULT_1: ${{ needs.stage1.result }}
+      RESULT_2: ${{ needs.stage2.result }}
+      RESULT_3: ${{ needs.stage3.result }}
+      RESULT_4: ${{ needs.stage4.result }}
+      RESULT_5: ${{ needs.stage5.result }}
+      RESULT_6: ${{ needs.stage6.result }}
+      RESULT_7: ${{ needs.stage7.result }}
+      RESULT_8: ${{ needs.stage8.result }}
+      OUTCOME_1: ${{ needs.stage1.outputs.outcome }}
+      OUTCOME_2: ${{ needs.stage2.outputs.outcome }}
+      OUTCOME_3: ${{ needs.stage3.outputs.outcome }}
+      OUTCOME_4: ${{ needs.stage4.outputs.outcome }}
+      OUTCOME_5: ${{ needs.stage5.outputs.outcome }}
+      OUTCOME_6: ${{ needs.stage6.outputs.outcome }}
+      OUTCOME_7: ${{ needs.stage7.outputs.outcome }}
+      OUTCOME_8: ${{ needs.stage8.outputs.outcome }}
+    steps:
+      - name: Require a verified browser artifact
+        shell: bash
+        run: |
+          for stage in {1..8}; do
+            result="RESULT_$stage"
+            outcome="OUTCOME_$stage"
+            if [[ "${!result}" == success && "${!outcome}" == complete ]]; then
+              exit 0
+            fi
+          done
+          echo '::error::No stage completed and verified the browser; inspect the stage logs and checkpoints.'
+          exit 1

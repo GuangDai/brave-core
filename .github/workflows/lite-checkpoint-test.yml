@@ -7,6 +7,8 @@ on:
     paths:
       - build/ci/lite_checkpoint.py
       - build/ci/lite_checkpoint_test.py
+      - build/ci/lite_timebox.py
+      - build/ci/lite_timebox_test.py
       - .github/workflows/lite-checkpoint-test.yml
 
 permissions:
@@ -21,7 +23,9 @@ jobs:
         with:
           persist-credentials: false
       - name: Test checkpoint validation
-        run: python3 build/ci/lite_checkpoint_test.py -v
+        run: |
+          python3 build/ci/lite_checkpoint_test.py -v
+          python3 build/ci/lite_timebox_test.py -v
       - name: Save a checkpoint
         run: |
           mkdir -p "$RUNNER_TEMP/fixture"
@@ -54,9 +58,9 @@ jobs:
       - name: Restore and verify the checkpoint
         run: |
           python3 build/ci/lite_checkpoint.py restore \
-            --workspace "$RUNNER_TEMP/restored" \
+            --workspace "$RUNNER_TEMP/fixture" \
             --checkpoint "$RUNNER_TEMP/checkpoint" \
             --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA"
-          test -x "$RUNNER_TEMP/restored/executable"
-          test "$(readlink "$RUNNER_TEMP/restored/alias")" = executable
-          "$RUNNER_TEMP/restored/executable"
+          test -x "$RUNNER_TEMP/fixture/executable"
+          test "$(readlink "$RUNNER_TEMP/fixture/alias")" = executable
+          "$RUNNER_TEMP/fixture/executable"
