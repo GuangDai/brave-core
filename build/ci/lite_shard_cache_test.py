@@ -28,6 +28,16 @@ class ShardCacheTest(unittest.TestCase):
         backends = lite_shard_cache.verify_set(self.root, self.identity, "1")
         self.assertEqual(backends.count("|read-only"), 5)
 
+    def test_verified_cache_can_seed_a_new_run(self):
+        lite_shard_cache.verify_one(self.root, self.identity, "1", "1")
+        destination = self.root / "new-cache"
+        lite_shard_cache.seed_cache(self.root, "1", "1", destination)
+        source = self.root / "brave-lite-shard-1-a1" / "cache" / "aa" / "entry"
+        self.assertEqual((destination / "aa" / "entry").read_bytes(), source.read_bytes())
+        self.assertEqual((destination / "aa" / "entry").stat().st_ino, source.stat().st_ino)
+        with self.assertRaisesRegex(RuntimeError, "exceeds"):
+            lite_shard_cache.seed_cache(self.root, "1", "2", self.root / "too-large", 1)
+
     def test_changed_commit_can_reuse_matching_cache_entries(self):
         changed = {**self.identity, "commit": "new", "image_version": "new"}
         self.assertIn("|read-only", lite_shard_cache.verify_set(self.root, changed, "1"))

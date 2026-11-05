@@ -7,6 +7,8 @@ on:
       - .github/workflows/lite-cache-parts-test.yml
       - build/ci/lite_cache_parts.py
       - build/ci/lite_cache_parts_test.py
+      - build/ci/lite_interrupted_build_test.js
+      - build/commands/lib/interruptedBuild.js
   workflow_dispatch:
 
 permissions:
@@ -37,7 +39,9 @@ jobs:
 
       - name: Test part integrity handling
         working-directory: src/brave
-        run: python3 build/ci/lite_cache_parts_test.py -v
+        run: |
+          python3 build/ci/lite_cache_parts_test.py -v
+          node --test build/ci/lite_interrupted_build_test.js
 
       - name: Compile the first object and prepare its part
         shell: bash

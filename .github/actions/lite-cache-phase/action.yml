@@ -33,16 +33,18 @@ runs:
       shell: bash
       working-directory: ${{ github.workspace }}/src/brave
       env:
-        TARGET: ${{ inputs.target }}
+        LITE_BUILD_TARGET: ${{ inputs.target }}
+        PART: ${{ inputs.part }}
         BUDGET: ${{ inputs.budget }}
         CACHE_LIMIT: ${{ inputs.cache_limit }}
       run: |
+        if [[ "$PART" != 1 ]]; then export BRAVE_LITE_REUSE_GN=1; fi
         python3 build/ci/lite_timebox.py \
           --workspace "$GITHUB_WORKSPACE" --started "$LITE_JOB_STARTED" \
           --budget-minutes "$BUDGET" --reserve-gib 18 \
           --cache-dir "$RUNNER_TEMP/lite-shard/cache" --cache-limit-gib "$CACHE_LIMIT" \
           -- pnpm run build Static --target_arch=arm64 --skip_signing \
-          --target="$TARGET" --gn=symbol_level:0 --gn=cc_wrapper:ccache \
+          --target="$LITE_BUILD_TARGET" --gn=symbol_level:0 --gn=cc_wrapper:ccache \
           --gn=enable_brave_wallet:false \
           --gn=enable_brave_rewards:false \
           --gn=enable_brave_vpn_v1:false \

@@ -25,7 +25,9 @@ target and its corresponding cache; the remaining stages build and link the
 browser. Each stage saves its checkout and build output in up to eight
 compressed, SHA-256-verified volumes; the next stage restores those volumes.
 The full checkout is preserved so that incremental build metadata and source
-timestamps survive. A shortage of disk space stops the workflow for inspection.
+timestamps survive. Later stages reuse the already checked GN graph unless its
+arguments change or graph generation was interrupted. A shortage of disk space
+stops the workflow for inspection.
 Artifacts are retained for up to 90 days. Actual build speed, artifact sizes and
 GitHub storage availability need to be measured on a full build.
 
@@ -42,6 +44,9 @@ and attempts to reuse the available caches, including caches saved after a
 failed compiler job. Missing shards do not prevent the later stages from
 running. Ccache checks compiler content, command arguments and inputs when
 deciding whether to reuse an object; changes may reduce the cache hit rate.
+Alternatively, supplying a seed run ID starts five new shard jobs and seeds
+each one from its corresponding earlier single-cache artifact, up to 1 GiB per
+shard. Missing, invalid or larger seed artifacts are skipped.
 
 If GitHub cannot finish the build, the cache artifacts can also be downloaded
 for a compatible Apple Silicon Mac. Preserve the artifact directories and use

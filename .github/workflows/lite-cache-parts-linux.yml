@@ -7,6 +7,8 @@ on:
       - .github/workflows/lite-cache-parts-linux.yml
       - build/ci/lite_cache_parts.py
       - build/ci/lite_cache_parts_test.py
+      - build/ci/lite_interrupted_build_test.js
+      - build/commands/lib/interruptedBuild.js
   workflow_dispatch:
 
 permissions:
@@ -21,6 +23,9 @@ jobs:
         with:
           path: src/brave
           persist-credentials: false
+      - name: Test interrupted-build recovery
+        working-directory: src/brave
+        run: node --test build/ci/lite_interrupted_build_test.js
       - name: Install verified ccache
         run: |
           curl -fsSL https://github.com/ccache/ccache/releases/download/v4.14.2/ccache-4.14.2-linux-x86_64-musl-static.tar.gz -o "$RUNNER_TEMP/ccache.tar.gz"

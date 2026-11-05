@@ -39,6 +39,10 @@ jobs:
     timeout-minutes: 355
     env:
       BRAVE_LITE_KEEP_BUILD_OUTPUT: '1'
+      BRAVE_LITE_REUSE_GN: ${{ inputs.restore_stage != '0' && '1' || '0' }}
+      pnpm_config_fetch_retries: '6'
+      pnpm_config_fetch_retry_mintimeout: '10000'
+      pnpm_config_fetch_retry_maxtimeout: '60000'
     outputs:
       outcome: ${{ steps.result.outputs.outcome }}
       reason: ${{ steps.result.outputs.reason }}
@@ -232,10 +236,10 @@ jobs:
         working-directory: src/brave
         shell: bash
         env:
-          TARGET: ${{ steps.selection.outputs.target }}
+          LITE_BUILD_TARGET: ${{ steps.selection.outputs.target }}
         run: |
           args=(pnpm run build Static --target_arch=arm64 --skip_signing)
-          if [[ -n "$TARGET" ]]; then args+=(--target="$TARGET"); fi
+          if [[ -n "$LITE_BUILD_TARGET" ]]; then args+=(--target="$LITE_BUILD_TARGET"); fi
           python3 build/ci/lite_timebox.py \
             --workspace "$GITHUB_WORKSPACE" --started "$LITE_JOB_STARTED" \
             -- "${args[@]}" \
@@ -255,11 +259,11 @@ jobs:
         if: always() && steps.compile.outputs.outcome != ''
         shell: bash
         env:
-          TARGET: ${{ steps.selection.outputs.target }}
+          LITE_BUILD_TARGET: ${{ steps.selection.outputs.target }}
           OUTCOME: ${{ steps.compile.outputs.outcome }}
           REASON: ${{ steps.compile.outputs.reason }}
         run: |
-          if [[ -n "$TARGET" && "$OUTCOME" == complete ]]; then
+          if [[ -n "$LITE_BUILD_TARGET" && "$OUTCOME" == complete ]]; then
             echo 'outcome=checkpoint' >> "$GITHUB_OUTPUT"
             echo 'reason=next' >> "$GITHUB_OUTPUT"
           else

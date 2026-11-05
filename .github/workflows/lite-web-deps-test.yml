@@ -1,0 +1,50 @@
+name: Validate web discovery dependency patch
+
+on:
+  push:
+    branches: [ci/cache-checkpoints]
+    paths:
+      - .github/workflows/lite-web-deps-test.yml
+      - patches/brave/vendor/web-discovery-project/**
+      - patches/.repositories.cfg
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      pnpm_config_fetch_retries: '6'
+      pnpm_config_fetch_retry_mintimeout: '10000'
+      pnpm_config_fetch_retry_maxtimeout: '60000'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: src/brave
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.16.0
+      - name: Set up pnpm
+        run: |
+          npm install --global pnpm@11.11.0
+          test "$(pnpm config get fetch-retries)" = 6
+          echo "pnpm_config_store_dir=$GITHUB_WORKSPACE/src/brave/.ci-pnpm-store" >> "$GITHUB_ENV"
+      - name: Check out the pinned dependency
+        run: |
+          git init "$GITHUB_WORKSPACE/src/brave/.ci-web-fixture"
+          git -C "$GITHUB_WORKSPACE/src/brave/.ci-web-fixture" remote add origin https://github.com/brave/web-discovery-project.git
+          git -C "$GITHUB_WORKSPACE/src/brave/.ci-web-fixture" fetch --depth 1 origin 80791e59ab389f3a49c94748f799dc3b5d8adb6b
+          git -C "$GITHUB_WORKSPACE/src/brave/.ci-web-fixture" checkout --detach FETCH_HEAD
+      - name: Apply the verified URL patches
+        run: |
+          fixture="$GITHUB_WORKSPACE/src/brave/.ci-web-fixture"
+          patch_dir="$GITHUB_WORKSPACE/src/brave/patches/brave/vendor/web-discovery-project"
+          git -C "$fixture" apply --check "$patch_dir/package.json.patch" "$patch_dir/pnpm-lock.yaml.patch"
+          git -C "$fixture" apply "$patch_dir/package.json.patch" "$patch_dir/pnpm-lock.yaml.patch"
+      - name: Verify the frozen dependency lockfile
+        working-directory: src/brave/.ci-web-fixture
+        run: pnpm install --frozen-lockfile --ignore-scripts --yes

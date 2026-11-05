@@ -23,6 +23,14 @@ on:
         description: Existing shard attempt (defaults to checkpoint attempt or 1)
         type: string
         default: ''
+      seed_run_id:
+        description: Earlier single-cache run to seed each parallel shard (up to 1 GiB per shard)
+        type: string
+        default: ''
+      seed_attempt:
+        description: Attempt of the earlier single-cache run
+        type: string
+        default: '1'
   push:
     branches: [lite/v1.98.63]
     paths:
@@ -56,6 +64,8 @@ jobs:
     with:
       shard: ${{ matrix.shard }}
       target: ${{ matrix.target }}
+      seed_run_id: ${{ inputs.seed_run_id || '' }}
+      seed_attempt: ${{ inputs.seed_attempt || '1' }}
 
   stage1:
     needs: shards

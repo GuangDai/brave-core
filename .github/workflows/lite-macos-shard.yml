@@ -9,8 +9,17 @@ on:
       target:
         required: true
         type: string
+      seed_run_id:
+        required: false
+        default: ''
+        type: string
+      seed_attempt:
+        required: false
+        default: '1'
+        type: string
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
@@ -19,6 +28,9 @@ jobs:
     timeout-minutes: 355
     env:
       BRAVE_LITE_KEEP_BUILD_OUTPUT: '1'
+      pnpm_config_fetch_retries: '6'
+      pnpm_config_fetch_retry_mintimeout: '10000'
+      pnpm_config_fetch_retry_maxtimeout: '60000'
     steps:
       - name: Start the stage clock
         run: echo "LITE_JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
@@ -59,6 +71,31 @@ jobs:
           xcrun --sdk macosx --show-sdk-version
           df -h "$GITHUB_WORKSPACE"
           pnpm run init --no-history --target_arch=arm64
+
+      - name: Download the previous shard cache
+        id: seed_download
+        if: inputs.seed_run_id != ''
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: brave-lite-shard-${{ inputs.shard }}-a${{ inputs.seed_attempt }}
+          path: ${{ runner.temp }}/lite-seed/brave-lite-shard-${{ inputs.shard }}-a${{ inputs.seed_attempt }}
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.seed_run_id }}
+
+      - name: Seed the writable cache
+        if: steps.seed_download.outcome == 'success'
+        continue-on-error: true
+        working-directory: src/brave
+        env:
+          LITE_SHARD: ${{ inputs.shard }}
+          LITE_SEED_ATTEMPT: ${{ inputs.seed_attempt }}
+        run: |
+          python3 build/ci/lite_shard_cache.py verify-one \
+            --root "$RUNNER_TEMP/lite-seed" --workspace "$GITHUB_WORKSPACE" \
+            --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA" \
+            --attempt "$LITE_SEED_ATTEMPT" --shard "$LITE_SHARD" \
+            --seed-to "$RUNNER_TEMP/lite-shard/cache"
 
       - name: Compile and save cache part 1
         id: part1
