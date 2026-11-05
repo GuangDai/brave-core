@@ -433,32 +433,7 @@ jobs:
           STATUS_2: ${{ steps.part2.outcome }}
           STATUS_3: ${{ steps.part3.outcome }}
           STATUS_4: ${{ steps.part4.outcome }}
-        run: |
-          outcome=''
-          reason=''
-          for number in 4 3 2 1; do
-            outcome_var="OUTCOME_$number"
-            reason_var="REASON_$number"
-            status_var="STATUS_$number"
-            if [[ -n "${!outcome_var}" ]]; then
-              outcome="${!outcome_var}"
-              reason="${!reason_var}"
-              break
-            fi
-            if [[ "${!status_var}" == failure ]]; then
-              outcome=failed
-              break
-            fi
-          done
-          [[ -n "$outcome" ]]
-          echo "compile_outcome=$outcome" >> "$GITHUB_OUTPUT"
-          if [[ -n "$LITE_BUILD_TARGET" && "$outcome" == complete ]]; then
-            echo 'outcome=checkpoint' >> "$GITHUB_OUTPUT"
-            echo 'reason=next' >> "$GITHUB_OUTPUT"
-          else
-            echo "outcome=$outcome" >> "$GITHUB_OUTPUT"
-            echo "reason=$reason" >> "$GITHUB_OUTPUT"
-          fi
+        run: python3 .lite-tools/build/ci/lite_stage_result.py
 
       - name: Verify the browser
         if: steps.result.outputs.outcome == 'complete'

@@ -6,6 +6,8 @@ on:
     paths:
       - .github/workflows/lite-stage-cache-test.yml
       - .github/actions/lite-stage-cache-phase/action.yml
+      - build/ci/lite_stage_result.py
+      - build/ci/lite_stage_result_test.py
   workflow_dispatch:
 
 permissions:
@@ -23,6 +25,15 @@ jobs:
         with:
           path: src/brave
           persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          path: .lite-tools
+          sparse-checkout: |
+            build/ci
+            .github/actions/lite-stage-cache-phase
+          persist-credentials: false
+      - name: Test continuation and failure selection
+        run: python3 .lite-tools/build/ci/lite_stage_result_test.py -v
       - name: Set up a verified ccache and simulated build
         run: |
           curl -fsSL https://github.com/ccache/ccache/releases/download/v4.14.2/ccache-4.14.2-darwin.tar.gz -o "$RUNNER_TEMP/ccache.tar.gz"
@@ -43,7 +54,7 @@ jobs:
           echo "LITE_JOB_STARTED=$(($(date +%s) - 50))" >> "$GITHUB_ENV"
       - name: Save the first timed part
         id: first
-        uses: ./src/brave/.github/actions/lite-stage-cache-phase
+        uses: ./.lite-tools/.github/actions/lite-stage-cache-phase
         with:
           stage: '1'
           shard: '1'
@@ -52,7 +63,7 @@ jobs:
           cache_limit: '2'
       - name: Simulate an upload failure
         id: second
-        uses: ./src/brave/.github/actions/lite-stage-cache-phase
+        uses: ./.lite-tools/.github/actions/lite-stage-cache-phase
         with:
           stage: bad/name
           shard: '1'
@@ -61,7 +72,7 @@ jobs:
           cache_limit: '4'
       - name: Save entries from the failed upload with the next part
         id: third
-        uses: ./src/brave/.github/actions/lite-stage-cache-phase
+        uses: ./.lite-tools/.github/actions/lite-stage-cache-phase
         with:
           stage: '1'
           shard: '1'
@@ -70,7 +81,7 @@ jobs:
           cache_limit: '6'
       - name: Save results after a simulated compiler failure
         id: fourth
-        uses: ./src/brave/.github/actions/lite-stage-cache-phase
+        uses: ./.lite-tools/.github/actions/lite-stage-cache-phase
         with:
           stage: '1'
           shard: '1'
