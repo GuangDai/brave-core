@@ -10,7 +10,7 @@ permissions: {}
 
 jobs:
   capacity:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 10
     steps:
       - name: Inspect available build resources
@@ -23,6 +23,7 @@ jobs:
           df -h "$RUNNER_TEMP" "$GITHUB_WORKSPACE"
           xcode-select -p
           xcodebuild -version
+          xcrun --sdk macosx --show-sdk-version
           ls /Applications | grep '^Xcode' || true
           node --version
           git --version
