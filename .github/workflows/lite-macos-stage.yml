@@ -139,10 +139,10 @@ jobs:
             --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA"
           test "$(git -C src/brave rev-parse HEAD)" = "$GITHUB_SHA"
 
-      - name: Install build dependencies
+      - name: Initialize Chromium
         if: inputs.restore_stage == '0'
         working-directory: src/brave
-        run: pnpm install --frozen-lockfile --yes
+        run: pnpm run init --no-history --target_arch=arm64
 
       - name: Test patch application
         if: inputs.restore_stage == '0'
@@ -152,11 +152,6 @@ jobs:
         run: |
           mkdir -p "$TMPDIR"
           pnpm exec jest --runInBand --runTestsByPath build/commands/lib/gitPatcher.test.js
-
-      - name: Initialize Chromium
-        if: inputs.restore_stage == '0'
-        working-directory: src/brave
-        run: pnpm run init --no-history --target_arch=arm64
 
       - name: Validate shard selection
         env:

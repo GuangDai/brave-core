@@ -52,10 +52,6 @@ jobs:
           echo "CCACHE_REMOTE_STORAGE=file:$RUNNER_TEMP/lite-shard/cache" >> "$GITHUB_ENV"
           mkdir -p "$RUNNER_TEMP/lite-shard/cache"
 
-      - name: Install build dependencies
-        working-directory: src/brave
-        run: pnpm install --frozen-lockfile --yes
-
       - name: Initialize Chromium
         working-directory: src/brave
         run: |

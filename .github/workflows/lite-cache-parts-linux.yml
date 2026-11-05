@@ -3,7 +3,10 @@ name: Incremental compiler cache artifact test
 on:
   push:
     branches: [ci/cache-checkpoints]
-    paths: [.github/workflows/lite-cache-parts-linux.yml]
+    paths:
+      - .github/workflows/lite-cache-parts-linux.yml
+      - build/ci/lite_cache_parts.py
+      - build/ci/lite_cache_parts_test.py
   workflow_dispatch:
 
 permissions:

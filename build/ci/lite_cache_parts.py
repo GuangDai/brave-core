@@ -50,6 +50,7 @@ def verify(root, build_identity, shard, attempt):
         manifest = json.loads((path / "manifest.json").read_text())
         old = manifest.get("identity")
         if (manifest.get("version") != 1 or not isinstance(old, dict)
+                or not old.get("repository") or not old.get("architecture")
                 or old.get("repository") != build_identity.get("repository")
                 or old.get("architecture") != build_identity.get("architecture")
                 or manifest.get("shard") != shard or manifest.get("target") != TARGETS[shard]
