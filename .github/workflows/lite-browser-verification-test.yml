@@ -7,16 +7,24 @@ on:
       - .github/workflows/lite-browser-verification.yml
       - .github/workflows/lite-browser-verification-test.yml
       - .github/actions/lite-browser-test-cache/**
+      - .github/actions/lite-browser-test-cache-restore/**
       - .github/lite-testing/**
       - build/ci/lite_browser_checkpoint.py
       - build/ci/lite_browser_checkpoint_test.py
       - build/ci/lite_browser_verify.py
       - build/ci/lite_browser_verify_test.py
+      - build/ci/lite_browser_report.py
+      - build/ci/lite_browser_report_test.py
+      - build/ci/lite_browser_backup_verify.py
+      - build/ci/lite_browser_backup_verify_test.py
       - build/ci/lite_stream_checkpoint.py
       - build/ci/lite_stream_namespace_test.py
+      - build/ci/lite_browser_test_cache_restore.py
+      - build/ci/lite_browser_test_cache_restore_test.py
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
@@ -31,5 +39,159 @@ jobs:
       - name: Test test-list, result, checkpoint and overlay safeguards
         run: |
           python3 build/ci/lite_browser_verify_test.py -v
+          python3 build/ci/lite_browser_report_test.py -v
+          python3 build/ci/lite_browser_backup_verify_test.py -v
+          python3 build/ci/lite_browser_test_cache_restore_test.py -v
           python3 build/ci/lite_browser_checkpoint_test.py -v
           python3 build/ci/lite_stream_namespace_test.py -v
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.16.0
+      - name: Prepare a synthetic test compiler
+        run: |
+          npm install --global pnpm@11.11.0
+          curl -fsSL https://github.com/ccache/ccache/releases/download/v4.14.2/ccache-4.14.2-darwin.tar.gz -o "$RUNNER_TEMP/ccache.tar.gz"
+          echo 'cf240009630b605b775c7c5c7b7105a3b196c79f31af322c1557969aa28003fc  '"$RUNNER_TEMP/ccache.tar.gz" | shasum -a 256 -c -
+          tar -xzf "$RUNNER_TEMP/ccache.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/ccache-4.14.2-darwin" >> "$GITHUB_PATH"
+          echo "CCACHE_DIR=$RUNNER_TEMP/ccache-stats" >> "$GITHUB_ENV"
+          echo "LITE_JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+          echo "LITE_SOURCE_COMMIT=$GITHUB_SHA" >> "$GITHUB_ENV"
+          mkdir -p src/brave/build/ci "$RUNNER_TEMP/lite-stage-cache/aa"
+          cp build/ci/lite_timebox.py build/ci/lite_cache_parts.py build/ci/lite_checkpoint.py build/ci/lite_shard_cache.py src/brave/build/ci/
+          mkdir -p .lite-tools/build/ci
+          cp build/ci/lite_browser_test_cache_restore.py build/ci/lite_browser_checkpoint.py build/ci/lite_checkpoint.py build/ci/lite_shard_cache.py .lite-tools/build/ci/
+          mkdir -p "$RUNNER_TEMP/browser-verification"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          env = os.environ
+          data = {'test_repository': env['GITHUB_REPOSITORY'], 'test_architecture': 'arm64',
+                  'test_source_commit': env['GITHUB_SHA'], 'test_overlay': False,
+                  'test_overlay_commit': '', 'test_overlay_sha256': '',
+                  'app_binary_sha256': 'a' * 64, 'verification_workflow_commit': env['GITHUB_SHA']}
+          (Path(env['RUNNER_TEMP']) / 'browser-verification/provenance.json').write_text(json.dumps(data))
+          PY
+          printf '%s\n' '{"name":"browser-verification-fixture","private":true,"scripts":{"build":"python3 fake_build.py"}}' > src/brave/package.json
+          cat > src/brave/fake_build.py <<'PY'
+          import os
+          from pathlib import Path
+          import sys
+          assert '--target=brave_browser_tests' in sys.argv
+          (Path(os.environ['RUNNER_TEMP']) / 'lite-stage-cache/aa/synthetic').write_text('fake compiler result')
+          PY
+      - name: Save a synthetic browser-test cache
+        id: synthetic_cache
+        uses: ./.github/actions/lite-browser-test-cache
+        with:
+          stage: '1'
+          shard: '5'
+          target: brave_browser_tests
+          part: '1'
+          budget: '85'
+          cache_limit: '2'
+      - uses: actions/download-artifact@v4
+        with:
+          name: brave-lite-verify-stage-1-shard-5-part-1-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/downloaded-test-cache
+      - name: Check isolated cache naming and metadata
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import sys
+          sys.path.insert(0, 'build/ci')
+          from lite_shard_cache import entries
+          root = Path(os.environ['RUNNER_TEMP']) / 'downloaded-test-cache'
+          manifest = json.loads((root / 'manifest.json').read_text())
+          assert manifest['actual_build_target'] == 'brave_browser_tests'
+          assert manifest['cache_purpose'] == 'browser-verification'
+          assert manifest['verification_provenance']['test_source_commit'] == os.environ['GITHUB_SHA']
+          assert manifest['files'] == entries(root / 'cache')
+          assert (root / 'cache/aa/synthetic').read_text() == 'fake compiler result'
+          PY
+      - name: Restore the synthetic verification cache
+        id: synthetic_restore
+        uses: ./.github/actions/lite-browser-test-cache-restore
+        with:
+          run_id: ${{ github.run_id }}
+          attempt: ${{ github.run_attempt }}
+      - name: Check the restored read-only backend
+        env:
+          REUSED: ${{ steps.synthetic_restore.outputs.reused }}
+        run: |
+          [[ "$REUSED" == true ]]
+          [[ "$CCACHE_REMOTE_STORAGE" == *'|read-only'* ]]
+      - name: Prepare a corrupt synthetic verification cache
+        run: |
+          cp -R "$RUNNER_TEMP/downloaded-test-cache" "$RUNNER_TEMP/corrupt-test-cache"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP']) / 'corrupt-test-cache'
+          manifest = json.loads((root / 'manifest.json').read_text())
+          manifest['part'] = 2
+          (root / 'manifest.json').write_text(json.dumps(manifest))
+          (root / 'cache/aa/synthetic').write_text('deliberately corrupted')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brave-lite-verify-stage-1-shard-5-part-2-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/corrupt-test-cache/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+  corrupt_cache:
+    needs: test
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Prepare verification metadata
+        run: |
+          echo "LITE_JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+          echo "LITE_SOURCE_COMMIT=$GITHUB_SHA" >> "$GITHUB_ENV"
+          echo 'CCACHE_REMOTE_STORAGE=file:///baseline|read-only' >> "$GITHUB_ENV"
+          mkdir -p .lite-tools/build/ci "$RUNNER_TEMP/browser-verification"
+          cp build/ci/lite_browser_test_cache_restore.py build/ci/lite_browser_checkpoint.py build/ci/lite_checkpoint.py build/ci/lite_shard_cache.py .lite-tools/build/ci/
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          env = os.environ
+          data = {'test_repository': env['GITHUB_REPOSITORY'], 'test_architecture': 'arm64',
+                  'test_source_commit': env['GITHUB_SHA'], 'test_overlay': False,
+                  'test_overlay_commit': '', 'test_overlay_sha256': '',
+                  'app_binary_sha256': 'a' * 64, 'verification_workflow_commit': env['GITHUB_SHA']}
+          (Path(env['RUNNER_TEMP']) / 'browser-verification/provenance.json').write_text(json.dumps(data))
+          PY
+      - name: Reject corrupt cache parts
+        id: corrupt
+        uses: ./.github/actions/lite-browser-test-cache-restore
+        with:
+          run_id: ${{ github.run_id }}
+          attempt: ${{ github.run_attempt }}
+      - name: Check corrupt cache did not change the backend
+        env:
+          REUSED: ${{ steps.corrupt.outputs.reused }}
+        run: |
+          [[ "$REUSED" == false ]]
+          [[ "$CCACHE_REMOTE_STORAGE" == 'file:///baseline|read-only' ]]
+      - name: Skip a missing prior run
+        id: missing
+        uses: ./.github/actions/lite-browser-test-cache-restore
+        with:
+          run_id: '1'
+          attempt: '1'
+      - name: Check missing cache leaves the backend unchanged
+        env:
+          REUSED: ${{ steps.missing.outputs.reused }}
+        run: |
+          [[ "$REUSED" == false ]]
+          [[ "$CCACHE_REMOTE_STORAGE" == 'file:///baseline|read-only' ]]

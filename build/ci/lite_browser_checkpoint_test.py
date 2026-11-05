@@ -2,17 +2,22 @@
 """Test checkpoint provenance and the isolated translation-test overlay."""
 
 import json
+import os
 from pathlib import Path
 import plistlib
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import lite_browser_checkpoint as guard
 
 
 class BrowserCheckpointTest(unittest.TestCase):
     def setUp(self):
+        self.env = patch.dict(os.environ, {'GITHUB_SHA': guard.SOURCE})
+        self.env.start()
+        self.addCleanup(self.env.stop)
         self.temp = tempfile.TemporaryDirectory(dir=Path(__file__).parent)
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
@@ -28,7 +33,8 @@ class BrowserCheckpointTest(unittest.TestCase):
         source = subprocess.check_output(['git', 'show', f'{guard.SOURCE}:{guard.TEST_PATH}'],
                                          cwd=Path(__file__).resolve().parents[2])
         (self.brave / guard.TEST_PATH).write_bytes(source)
-        self.manifest = {'identity': {'commit': guard.SOURCE}, 'build_phase': 6,
+        self.manifest = {'identity': {'commit': guard.SOURCE, 'repository': 'example/project',
+                                      'architecture': 'arm64'}, 'build_phase': 6,
                          'phase_complete': True}
 
     def test_overlay_is_pinned_idempotent_and_does_not_change_app(self):

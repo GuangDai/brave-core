@@ -35,6 +35,14 @@ on:
         description: Optional extra compiler cache selection
         type: string
         default: ''
+      verification_cache_run_id:
+        description: Optional earlier browser-verification cache run ID
+        type: string
+        default: ''
+      verification_cache_attempt:
+        description: Earlier browser-verification cache attempt
+        type: string
+        default: ''
 
 permissions:
   actions: read
@@ -76,6 +84,7 @@ jobs:
             build/ci
             .github/lite-testing
             .github/actions/lite-browser-test-cache
+            .github/actions/lite-browser-test-cache-restore
             .github/actions/lite-rescue-cache
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -127,6 +136,12 @@ jobs:
         uses: ./.lite-tools/.github/actions/lite-rescue-cache
         with:
           selection: ${{ inputs.rescue_cache }}
+      - name: Reuse an optional browser-verification cache
+        if: inputs.checkpoint_namespace == 'brave-lite-verify' || inputs.verification_cache_run_id != ''
+        uses: ./.lite-tools/.github/actions/lite-browser-test-cache-restore
+        with:
+          run_id: ${{ inputs.verification_cache_run_id || inputs.restore_run_id }}
+          attempt: ${{ inputs.verification_cache_attempt || inputs.restore_attempt }}
       - name: Enable a separate writable compiler cache
         run: |
           mkdir -p "$RUNNER_TEMP/lite-stage-cache"
@@ -222,6 +237,18 @@ jobs:
           status=$?
           cat "$RUNNER_TEMP/browser-verification/controller.log"
           exit "$status"
+      - name: Record browser test result checksums
+        id: report
+        if: always() && steps.result.outcome == 'success'
+        continue-on-error: true
+        env:
+          OUTCOME: ${{ steps.result.outputs.compile_outcome }}
+          REASON: ${{ steps.result.outputs.reason }}
+          APP_CHECK: ${{ steps.app_check.outcome }}
+          TEST_STATUS: ${{ steps.tests.outcome }}
+        run: |
+          python3 .lite-tools/build/ci/lite_browser_report.py --root "$RUNNER_TEMP/browser-verification" \
+            --compile-outcome "$OUTCOME" --reason "$REASON" --app-check "$APP_CHECK" --test-status "$TEST_STATUS"
       - name: Upload browser test results and provenance
         if: always() && steps.result.outcome == 'success'
         uses: actions/upload-artifact@v4
@@ -403,7 +430,7 @@ jobs:
         if: always() && steps.result.outcome == 'success' && steps.record.outcome != 'success'
         run: echo '::warning::The isolated test checkpoint could not be saved; uploaded cache parts remain available.'
       - name: Report incomplete or failed browser verification
-        if: always() && (steps.result.outcome != 'success' || steps.result.outputs.compile_outcome != 'complete' || steps.app_check.outcome != 'success' || steps.tests.outcome != 'success')
+        if: always() && (steps.result.outcome != 'success' || steps.result.outputs.compile_outcome != 'complete' || steps.app_check.outcome != 'success' || steps.tests.outcome != 'success' || steps.report.outcome != 'success')
         run: |
           echo '::error::Browser verification did not complete; inspect the saved test logs and cache parts.'
           exit 1

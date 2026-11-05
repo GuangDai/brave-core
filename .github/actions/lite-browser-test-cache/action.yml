@@ -92,6 +92,8 @@ runs:
         data = json.loads(path.read_text())
         data['actual_build_target'] = 'brave_browser_tests'
         data['cache_purpose'] = 'browser-verification'
+        data['verification_provenance'] = json.loads(
+            (Path(env['RUNNER_TEMP']) / 'browser-verification/provenance.json').read_text())
         path.write_text(json.dumps(data, separators=(',', ':')) + '\n')
         PY
 

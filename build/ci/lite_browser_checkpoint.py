@@ -33,7 +33,10 @@ def sha256(path):
 def validate_checkpoint(manifest, source, overlay, namespace):
     if not re.fullmatch(r'[0-9a-f]{40}', source):
         raise ValueError('Invalid source commit')
-    if manifest.get('identity', {}).get('commit') != source:
+    identity = manifest.get('identity')
+    if (not isinstance(identity, dict) or identity.get('commit') != source
+            or identity.get('architecture') != 'arm64'
+            or not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', str(identity.get('repository', '')))):
         raise ValueError('Checkpoint source differs')
     kind = manifest.get('checkpoint_kind')
     if namespace == 'brave-lite':
@@ -42,7 +45,12 @@ def validate_checkpoint(manifest, source, overlay, namespace):
             raise ValueError('Expected a completed browser application checkpoint')
     elif namespace == 'brave-lite-verify':
         if (kind != KIND or manifest.get('test_source_commit') != source
+                or manifest.get('test_repository') != identity['repository']
+                or manifest.get('test_architecture') != 'arm64'
                 or manifest.get('test_overlay') is not overlay
+                or manifest.get('test_overlay_commit') != (OVERLAY_COMMIT if overlay else '')
+                or manifest.get('test_overlay_sha256') != (OVERLAY_SHA256 if overlay else '')
+                or not re.fullmatch(r'[0-9a-f]{40}', str(manifest.get('verification_workflow_commit', '')))
                 or not re.fullmatch(r'[0-9a-f]{64}', str(manifest.get('app_binary_sha256', '')))):
             raise ValueError('Browser verification checkpoint provenance differs')
     else:
@@ -92,10 +100,14 @@ def prepare(workspace, manifest, source, overlay, namespace, patch_path, provena
     if namespace == 'brave-lite-verify' and digest != manifest['app_binary_sha256']:
         raise ValueError('Application executable differs from the test checkpoint')
     overlay_hash = prepare_overlay(workspace / 'src/brave', source, overlay, patch_path)
-    data = {'test_source_commit': source, 'test_overlay': overlay,
+    workflow_commit = os.environ.get('GITHUB_SHA', '')
+    if not re.fullmatch(r'[0-9a-f]{40}', workflow_commit):
+        raise ValueError('Verification workflow commit is missing or invalid')
+    data = {'test_repository': manifest['identity']['repository'], 'test_architecture': 'arm64',
+            'test_source_commit': source, 'test_overlay': overlay,
             'test_overlay_commit': OVERLAY_COMMIT if overlay else '',
             'test_overlay_sha256': overlay_hash, 'app_binary_sha256': digest,
-            'verification_workflow_commit': os.environ.get('GITHUB_SHA', '')}
+            'verification_workflow_commit': workflow_commit}
     provenance.write_text(json.dumps(data, indent=2) + '\n')
     print('Verified browser checkpoint and isolated test provenance', flush=True)
 
