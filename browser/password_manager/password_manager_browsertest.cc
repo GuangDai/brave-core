@@ -59,9 +59,10 @@ IN_PROC_BROWSER_TEST_F(PasswordManagerTest,
       browser(), GURL(chrome::kChromeUIPasswordManagerURL)));
 
   // Wait for the password list to be populated.
-  EXPECT_TRUE(content::ExecJs(contents, R"(
+  EXPECT_TRUE(content::EvalJs(contents, R"(
     (async () => {
-      new Promise((resolve) => {
+      return new Promise((resolve) => {
+        const deadline = Date.now() + 10000;
         function queryShadowRoot(node, selector) {
           const nodes = [...node.querySelectorAll(selector)];
           const nodeIterator = document.createNodeIterator(
@@ -90,12 +91,16 @@ IN_PROC_BROWSER_TEST_F(PasswordManagerTest,
             resolve(true);
             return;
           }
+          if (Date.now() >= deadline) {
+            resolve(false);
+            return;
+          }
           setTimeout(checkPasswords, 100);
         }
         checkPasswords();
       });
     })();
-  )"));
+  )").ExtractBool());
 
   EXPECT_TRUE(console_observer.messages().empty());
 }
