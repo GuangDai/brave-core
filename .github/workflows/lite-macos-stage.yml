@@ -166,8 +166,46 @@ jobs:
           [[ "$SHARDS_RUN" =~ ^[0-9]+$ ]]
           [[ "$SHARDS_ATTEMPT" =~ ^[0-9]+$ ]]
 
-      - name: Download this target's compiler cache
+      - name: Download available cache parts
+        id: download_parts
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: brave-lite-shard-${{ steps.selection.outputs.shard }}-part-*-a${{ inputs.shards_attempt }}
+          path: ${{ runner.temp }}/lite-shard-parts
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.shards_run_id }}
+
+      - name: Find saved cache parts
+        id: parts
+        env:
+          SHARD: ${{ steps.selection.outputs.shard }}
+          ATTEMPT: ${{ inputs.shards_attempt }}
+        shell: bash
+        run: |
+          found=false
+          for part in 1 2 3 4; do
+            if [[ -f "$RUNNER_TEMP/lite-shard-parts/brave-lite-shard-$SHARD-part-$part-a$ATTEMPT/manifest.json" ]]; then
+              found=true
+            fi
+          done
+          echo "found=$found" >> "$GITHUB_OUTPUT"
+
+      - name: Verify available cache parts
+        if: steps.parts.outputs.found == 'true'
+        working-directory: src/brave
+        env:
+          SHARD: ${{ steps.selection.outputs.shard }}
+          ATTEMPT: ${{ inputs.shards_attempt }}
+        run: |
+          python3 build/ci/lite_cache_parts.py verify \
+            --root "$RUNNER_TEMP/lite-shard-parts" --workspace "$GITHUB_WORKSPACE" \
+            --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA" \
+            --attempt "$ATTEMPT" --shard "$SHARD"
+
+      - name: Download a legacy single cache
         id: download_cache
+        if: steps.parts.outputs.found != 'true'
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
@@ -176,8 +214,8 @@ jobs:
           github-token: ${{ github.token }}
           run-id: ${{ inputs.shards_run_id }}
 
-      - name: Verify the cache before reuse
-        if: steps.download_cache.outcome == 'success'
+      - name: Verify the legacy cache before reuse
+        if: steps.parts.outputs.found != 'true' && steps.download_cache.outcome == 'success'
         working-directory: src/brave
         env:
           SHARDS_ATTEMPT: ${{ inputs.shards_attempt }}
@@ -189,7 +227,7 @@ jobs:
             --attempt "$SHARDS_ATTEMPT" --shard "$SHARD"
 
       - name: Continue without this missing cache
-        if: steps.download_cache.outcome != 'success'
+        if: steps.parts.outputs.found != 'true' && steps.download_cache.outcome != 'success'
         run: |
           echo '::warning::This shard has no saved cache; build output will still be checkpointed.'
           echo 'CCACHE_DISABLE=true' >> "$GITHUB_ENV"

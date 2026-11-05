@@ -1,0 +1,126 @@
+name: macOS incremental cache handoff test
+
+on:
+  push:
+    branches: [ci/cache-checkpoints]
+    paths:
+      - .github/workflows/lite-cache-parts-test.yml
+      - build/ci/lite_cache_parts.py
+      - build/ci/lite_cache_parts_test.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  save:
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: src/brave
+          persist-credentials: false
+      - name: Install verified ccache
+        shell: bash
+        run: |
+          curl -fsSL https://github.com/ccache/ccache/releases/download/v4.14.2/ccache-4.14.2-darwin.tar.gz -o "$RUNNER_TEMP/ccache.tar.gz"
+          echo 'cf240009630b605b775c7c5c7b7105a3b196c79f31af322c1557969aa28003fc  '"$RUNNER_TEMP/ccache.tar.gz" | shasum -a 256 -c -
+          tar -xzf "$RUNNER_TEMP/ccache.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/ccache-4.14.2-darwin" >> "$GITHUB_PATH"
+          echo "CCACHE_DIR=$RUNNER_TEMP/ccache-stats" >> "$GITHUB_ENV"
+          echo 'CCACHE_COMPILERCHECK=content' >> "$GITHUB_ENV"
+          echo 'CCACHE_REMOTE_ONLY=true' >> "$GITHUB_ENV"
+          echo "CCACHE_REMOTE_STORAGE=file:$RUNNER_TEMP/lite-shard/cache" >> "$GITHUB_ENV"
+          echo "CCACHE_BASEDIR=$RUNNER_TEMP/producer-work" >> "$GITHUB_ENV"
+          echo "LITE_CLANG=$(xcrun --find clang)" >> "$GITHUB_ENV"
+
+      - name: Test part integrity handling
+        working-directory: src/brave
+        run: python3 build/ci/lite_cache_parts_test.py -v
+
+      - name: Compile the first object and prepare its part
+        shell: bash
+        run: |
+          mkdir -p "$CCACHE_BASEDIR/src" "$RUNNER_TEMP/lite-shard/cache"
+          printf 'int first(void) { return 1; }\n' > "$CCACHE_BASEDIR/src/first.c"
+          (cd "$CCACHE_BASEDIR/src" && ccache "$LITE_CLANG" -c "$CCACHE_BASEDIR/src/first.c" -o first.o)
+          python3 src/brave/build/ci/lite_cache_parts.py save \
+            --cache "$RUNNER_TEMP/lite-shard/cache" --stage "$RUNNER_TEMP/part1" \
+            --state "$RUNNER_TEMP/shard-state.json" --workspace "$CCACHE_BASEDIR" \
+            --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA" \
+            --shard 1 --part 1 --outcome checkpoint --reason cache
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brave-lite-shard-1-part-1-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/part1/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Compile the second object and prepare its part
+        shell: bash
+        run: |
+          printf 'int second(void) { return 2; }\n' > "$CCACHE_BASEDIR/src/second.c"
+          (cd "$CCACHE_BASEDIR/src" && ccache "$LITE_CLANG" -c "$CCACHE_BASEDIR/src/second.c" -o second.o)
+          python3 src/brave/build/ci/lite_cache_parts.py save \
+            --cache "$RUNNER_TEMP/lite-shard/cache" --stage "$RUNNER_TEMP/part2" \
+            --state "$RUNNER_TEMP/shard-state.json" --workspace "$CCACHE_BASEDIR" \
+            --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA" \
+            --shard 1 --part 2 --outcome checkpoint --reason time
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brave-lite-shard-1-part-2-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/part2/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+  reuse:
+    needs: save
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: src/brave
+          persist-credentials: false
+      - name: Install verified ccache
+        shell: bash
+        run: |
+          curl -fsSL https://github.com/ccache/ccache/releases/download/v4.14.2/ccache-4.14.2-darwin.tar.gz -o "$RUNNER_TEMP/ccache.tar.gz"
+          echo 'cf240009630b605b775c7c5c7b7105a3b196c79f31af322c1557969aa28003fc  '"$RUNNER_TEMP/ccache.tar.gz" | shasum -a 256 -c -
+          tar -xzf "$RUNNER_TEMP/ccache.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/ccache-4.14.2-darwin" >> "$GITHUB_PATH"
+          echo "CCACHE_DIR=$RUNNER_TEMP/ccache-stats" >> "$GITHUB_ENV"
+          echo 'CCACHE_COMPILERCHECK=content' >> "$GITHUB_ENV"
+          echo "CCACHE_BASEDIR=$RUNNER_TEMP/consumer-work" >> "$GITHUB_ENV"
+          echo "LITE_CLANG=$(xcrun --find clang)" >> "$GITHUB_ENV"
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: brave-lite-shard-1-part-*-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/parts
+
+      - name: Verify the parts from a different workspace
+        run: |
+          python3 src/brave/build/ci/lite_cache_parts.py verify --portable \
+            --root "$RUNNER_TEMP/parts" --workspace "$CCACHE_BASEDIR" \
+            --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA" \
+            --attempt "$GITHUB_RUN_ATTEMPT" --shard 1
+
+      - name: Reuse both objects
+        shell: bash
+        run: |
+          mkdir -p "$CCACHE_BASEDIR/src"
+          printf 'int first(void) { return 1; }\n' > "$CCACHE_BASEDIR/src/first.c"
+          printf 'int second(void) { return 2; }\n' > "$CCACHE_BASEDIR/src/second.c"
+          cd "$CCACHE_BASEDIR/src"
+          ccache "$LITE_CLANG" -c "$CCACHE_BASEDIR/src/first.c" -o first.o
+          ccache "$LITE_CLANG" -c "$CCACHE_BASEDIR/src/second.c" -o second.o
+          nm first.o | grep _first
+          nm second.o | grep _second
+          ccache --show-stats -v
+          ccache --print-stats | awk '$1 == "remote_storage_hit" && $2 == 2 { ok=1 } END { exit !ok }'

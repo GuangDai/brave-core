@@ -13,9 +13,10 @@ gates; a successful build and test run are required to validate them.
 `Brave Lite macOS staged build` starts five macOS 26 runners to compile V8,
 Blink core, Blink modules, content, and browser targets. The targets share
 dependencies, so some work is duplicated. Each runner saves its own eligible
-C/C++ compiler results as an artifact when its target finishes, its time runs
-out, or its cache reaches approximately 8 GiB. The five artifacts can occupy
-around 40 GiB in total. The main build checks and reads one cache at a time,
+C/C++ compiler results in up to four artifacts, saving newly cached files at
+roughly 2 GiB intervals or before each time deadline. Each shard stops at about
+8 GiB; the five shards can occupy around 40 GiB in total. The main build checks
+and reads the available parts of one shard at a time,
 limiting disk use; its cache statistics show how much work was reused. Other
 build actions and final linking run separately.
 
@@ -49,7 +50,7 @@ the parent of the `src` checkout. From the Brave Core checkout, verify one cache
 and print the environment settings for it with:
 
 ```sh
-python3 build/ci/lite_shard_cache.py verify-one --portable \
+python3 build/ci/lite_cache_parts.py verify --portable \
   --root /path/to/downloaded-artifacts --workspace /path/to/workspace \
   --repository GuangDai/brave-core --commit "$(git rev-parse HEAD)" \
   --attempt 1 --shard 1
