@@ -36,6 +36,9 @@ outputs:
   reason:
     value: ${{ steps.compile.outputs.reason }}
     description: Reason for a checkpoint
+  cache_saved:
+    value: ${{ (steps.upload.outcome == 'success' || steps.retry.outcome == 'success') && 'true' || 'false' }}
+    description: Whether the current cache part was uploaded
 
 runs:
   using: composite

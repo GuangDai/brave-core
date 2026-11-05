@@ -6,6 +6,8 @@ on:
     paths:
       - .github/workflows/lite-shared-handoff-test.yml
       - build/ci/lite_shared_fixture.py
+      - build/ci/lite_stage_phase.py
+      - build/ci/lite_stage_phase_test.py
   workflow_dispatch:
 
 permissions:
@@ -34,13 +36,16 @@ jobs:
           unzip -q "$RUNNER_TEMP/ninja.zip" -d "$GITHUB_WORKSPACE/fixture/tools"
       - name: Build the shared prerequisite and save the workspace
         run: |
+          python3 build/ci/lite_stage_phase_test.py -v
           python3 build/ci/lite_shared_plan.py --ninja "$GITHUB_WORKSPACE/fixture/tools/ninja" \
             --build "$GITHUB_WORKSPACE/fixture/out/Static" --report "$GITHUB_WORKSPACE/fixture/plan.json"
-          (cd fixture && tools/siso/siso ninja -C out/Static -offline \
-            -cache_dir "$GITHUB_WORKSPACE/fixture/siso-cache" -f brave_lite_shared.ninja brave_lite_shared)
+          (cd fixture && tools/siso/siso ninja -C out/Static brave_lite_shared -k 1 \
+            -f brave_lite_shared.ninja --offline -cache_dir "$GITHUB_WORKSPACE/fixture/siso-cache")
           python3 build/ci/lite_shared_fixture.py bootstrap --root "$GITHUB_WORKSPACE/fixture"
           python3 build/ci/lite_checkpoint.py save --workspace "$GITHUB_WORKSPACE/fixture" \
             --checkpoint "$RUNNER_TEMP/checkpoint" --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA"
+          python3 build/ci/lite_stage_phase.py record --manifest "$RUNNER_TEMP/checkpoint/manifest.json" \
+            --phase 5 --complete true --mode bootstrap
       - uses: actions/upload-artifact@v4
         with:
           name: brave-lite-s1-a${{ github.run_attempt }}-manifest
@@ -80,6 +85,8 @@ jobs:
             --workspace "$GITHUB_WORKSPACE/fixture" --manifest "$RUNNER_TEMP/manifest/manifest.json" \
             --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA" \
             --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --stage 1
-          (cd fixture && tools/siso/siso ninja -C out/Static -offline \
-            -cache_dir "$GITHUB_WORKSPACE/fixture/siso-cache" -f brave_lite_graph.ninja "brave_lite_group_$GROUP")
+          [[ "$(python3 build/ci/lite_stage_phase.py next --manifest "$RUNNER_TEMP/manifest/manifest.json" \
+            --phase 5 --mode assembly)" == 1 ]]
+          (cd fixture && tools/siso/siso ninja -C out/Static "brave_lite_group_$GROUP" -k 1 \
+            -f brave_lite_graph.ninja --offline -cache_dir "$GITHUB_WORKSPACE/fixture/siso-cache")
           python3 build/ci/lite_shared_fixture.py group --root "$GITHUB_WORKSPACE/fixture"

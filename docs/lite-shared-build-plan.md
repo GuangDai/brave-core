@@ -20,11 +20,18 @@ shared prerequisite and two restored it, then each built its own group without
 repeating the prerequisite. Siso's alternate Ninja file and streamed
 checkpoint restore passed in that fixture.
 
-The intended next experiment is to build the real shared target, save its
-complete workspace, restore it on five compatible runners, and build one group
-per runner. Their compiler caches would then be used by the final browser build.
+The experimental `lite-shared-build.yml` workflow accepts an existing complete
+workspace checkpoint, builds and checkpoints the real shared target, then
+restores it on five compatible runners. Each runner saves its own group's
+compiler cache in parts. If all five groups finish and upload their caches, the
+workflow starts a separate staged assembly run that restores one cache at a
+time and builds the five groups before linking the browser. Group cache
+manifests include `actual_build_target` and `ninja_file` to distinguish them
+from ordinary shards.
+
 The restore must preserve timestamps, build metadata, source revision,
-architecture, Xcode and SDK. This workflow is not integrated into the
-production build: test a real Chromium checkpoint, cache handoff, disk capacity
-and final linking before relying on it. The running build continues using the
-existing staged workflow.
+architecture, Xcode and SDK. The workflow remains experimental: a real
+Chromium checkpoint, group cache handoff, disk capacity and final linking have
+not yet been tested together. Interrupted bootstrap stages and uploaded group
+cache parts remain available for inspection. The running build continues
+using the existing staged workflow.

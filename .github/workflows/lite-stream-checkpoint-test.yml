@@ -20,6 +20,7 @@ permissions:
 
 jobs:
   linux:
+    if: github.event_name != 'workflow_dispatch' || github.ref_name != 'ci/shared-bootstrap'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -102,6 +103,7 @@ jobs:
           PY
 
   save-mac:
+    if: github.event_name != 'workflow_dispatch' || github.ref_name != 'ci/shared-bootstrap'
     runs-on: macos-26
     timeout-minutes: 20
     steps:
@@ -204,3 +206,9 @@ jobs:
           output = Path(os.environ['RUNNER_TEMP']) / 'lite-portable-workspace' / 'object.o'
           assert output.read_bytes() == random.Random(13).randbytes(250_000)
           PY
+
+  dispatch-probe:
+    if: github.event_name == 'workflow_dispatch' && github.ref_name == 'ci/shared-bootstrap'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'Workflow dispatch from a GitHub Actions token succeeded.'

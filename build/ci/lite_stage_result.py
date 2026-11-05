@@ -21,13 +21,18 @@ def summarize(target, parts):
         raise ValueError("No compiler part produced an outcome")
     stage_outcome = "checkpoint" if target and outcome == "complete" else outcome
     stage_reason = "next" if target and outcome == "complete" else reason
-    return {"compile_outcome": outcome, "outcome": stage_outcome, "reason": stage_reason}
+    result = {"compile_outcome": outcome, "outcome": stage_outcome, "reason": stage_reason}
+    if part.get("saved"):
+        if part["saved"] not in ("true", "false"):
+            raise ValueError("Unexpected cache upload status")
+        result["cache_saved"] = part["saved"]
+    return result
 
 
 def main():
     env = os.environ
     parts = [{key: env.get(f"{key.upper()}_{number}", "")
-              for key in ("outcome", "reason", "status")} for number in range(1, 5)]
+              for key in ("outcome", "reason", "status", "saved")} for number in range(1, 5)]
     result = summarize(env.get("LITE_BUILD_TARGET", ""), parts)
     text = "".join(f"{key}={value}\n" for key, value in result.items())
     if output := env.get("GITHUB_OUTPUT"):

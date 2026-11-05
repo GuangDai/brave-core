@@ -31,6 +31,10 @@ on:
         required: false
         default: '5'
         type: string
+      shared_mode:
+        required: false
+        default: normal
+        type: string
     outputs:
       outcome:
         value: ${{ jobs.build.outputs.outcome }}
@@ -154,27 +158,70 @@ jobs:
         env:
           START_PHASE: ${{ inputs.start_phase }}
           RESTORE_STAGE: ${{ inputs.restore_stage }}
+          SHARED_MODE: ${{ inputs.shared_mode }}
         shell: bash
         run: |
-          phase="$START_PHASE"
-          if [[ "$RESTORE_STAGE" != '0' ]]; then
-            phase=$(python3 .lite-tools/build/ci/lite_stage_phase.py next \
-              --manifest "$RUNNER_TEMP/lite-restore-manifest/manifest.json" --phase "$RESTORE_STAGE")
-          fi
-          case "$phase" in
-            1) shard=1; target='v8:v8' ;;
-            2) shard=2; target='third_party/blink/renderer/core:core' ;;
-            3) shard=3; target='third_party/blink/renderer/modules:modules' ;;
-            4) shard=4; target='content/browser:browser' ;;
-            5) shard=5; target='chrome/browser:browser' ;;
-            6) shard=1; target='' ;;
-            7) shard=2; target='' ;;
-            8) shard=3; target='' ;;
-            *) exit 1 ;;
+          ninja_file=''
+          case "$SHARED_MODE" in
+            bootstrap)
+              [[ "$RESTORE_STAGE" != '0' ]]
+              phase=5; shard=5; target=brave_lite_shared; ninja_file=brave_lite_shared.ninja ;;
+            normal|assembly)
+              phase="$START_PHASE"
+              if [[ "$RESTORE_STAGE" != '0' ]]; then
+                phase=$(python3 .lite-tools/build/ci/lite_stage_phase.py next \
+                  --manifest "$RUNNER_TEMP/lite-restore-manifest/manifest.json" \
+                  --phase "$RESTORE_STAGE" --mode "$SHARED_MODE")
+              elif [[ "$SHARED_MODE" == assembly ]]; then
+                echo '::error::Shared assembly requires a completed bootstrap checkpoint.'
+                exit 1
+              fi
+              case "$phase" in
+                1) shard=1; target='v8:v8' ;;
+                2) shard=2; target='third_party/blink/renderer/core:core' ;;
+                3) shard=3; target='third_party/blink/renderer/modules:modules' ;;
+                4) shard=4; target='content/browser:browser' ;;
+                5) shard=5; target='chrome/browser:browser' ;;
+                6) shard=1; target='' ;;
+                7) shard=2; target='' ;;
+                8) shard=3; target='' ;;
+                *) exit 1 ;;
+              esac
+              if [[ "$SHARED_MODE" == assembly && "$phase" -le 5 ]]; then
+                target="brave_lite_group_$phase"
+                ninja_file=brave_lite_graph.ninja
+              fi ;;
+            *) echo '::error::Invalid shared build mode.'; exit 1 ;;
           esac
           echo "phase=$phase" >> "$GITHUB_OUTPUT"
           echo "shard=$shard" >> "$GITHUB_OUTPUT"
           echo "target=$target" >> "$GITHUB_OUTPUT"
+          echo "ninja_file=$ninja_file" >> "$GITHUB_OUTPUT"
+
+      - name: Verify restored Siso source overrides
+        if: inputs.shared_mode != 'normal'
+        run: python3 .lite-tools/build/ci/lite_siso_config_verify.py --src "$GITHUB_WORKSPACE/src"
+
+      - name: Prepare the shared dependency plan
+        if: inputs.shared_mode == 'bootstrap'
+        shell: bash
+        run: |
+          build="$GITHUB_WORKSPACE/src/out/Static_arm64"
+          test -f "$build/build.ninja"
+          if [[ ! -f "$build/brave_lite_shared.ninja" || ! -f "$build/brave_lite_graph.ninja" || ! -f "$build/brave_lite_plan.json" ]]; then
+            curl -fsSL https://github.com/ninja-build/ninja/releases/download/v1.13.2/ninja-mac.zip -o "$RUNNER_TEMP/ninja.zip"
+            echo 'c99048673aa765960a99cf10c6ddb9f1fad506099ff0a0e137ad8960a88f321b  '"$RUNNER_TEMP/ninja.zip" | shasum -a 256 -c -
+            mkdir -p "$RUNNER_TEMP/lite-ninja"
+            unzip -q "$RUNNER_TEMP/ninja.zip" -d "$RUNNER_TEMP/lite-ninja"
+            python3 .lite-tools/build/ci/lite_shared_plan.py --ninja "$RUNNER_TEMP/lite-ninja/ninja" \
+              --build "$build" --report "$build/brave_lite_plan.json"
+          fi
+
+      - name: Check the shared assembly plan
+        if: inputs.shared_mode == 'assembly'
+        run: |
+          test -f "$GITHUB_WORKSPACE/src/out/Static_arm64/brave_lite_graph.ninja"
+          test -f "$GITHUB_WORKSPACE/src/out/Static_arm64/brave_lite_partitions.ninja"
 
       - name: Initialize Chromium
         if: inputs.restore_stage == '0'
@@ -230,6 +277,29 @@ jobs:
             fi
           done
           echo "found=$found" >> "$GITHUB_OUTPUT"
+
+      - name: Validate shared group cache metadata
+        if: inputs.shared_mode == 'assembly'
+        env:
+          SHARD: ${{ steps.selection.outputs.shard }}
+          ATTEMPT: ${{ inputs.shards_attempt }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          env = os.environ
+          root = Path(env['RUNNER_TEMP']) / 'lite-shard-parts'
+          pattern = f"brave-lite-shard-{env['SHARD']}-part-*-a{env['ATTEMPT']}/manifest.json"
+          manifests = list(root.glob(pattern))
+          if not manifests:
+              raise RuntimeError('The selected shared group has no saved cache parts')
+          for path in manifests:
+              data = json.loads(path.read_text())
+              if (data.get('actual_build_target') != f"brave_lite_group_{env['SHARD']}"
+                      or data.get('ninja_file') != 'brave_lite_graph.ninja'):
+                  raise RuntimeError(f'Incorrect group cache metadata: {path}')
+          PY
 
       - name: Verify available cache parts
         if: steps.parts.outputs.found == 'true'
@@ -375,6 +445,7 @@ jobs:
           stage: ${{ inputs.stage }}
           shard: ${{ steps.selection.outputs.shard }}
           target: ${{ steps.selection.outputs.target }}
+          ninja_file: ${{ steps.selection.outputs.ninja_file }}
           part: '1'
           budget: '85'
           cache_limit: '2'
@@ -387,6 +458,7 @@ jobs:
           stage: ${{ inputs.stage }}
           shard: ${{ steps.selection.outputs.shard }}
           target: ${{ steps.selection.outputs.target }}
+          ninja_file: ${{ steps.selection.outputs.ninja_file }}
           part: '2'
           budget: '145'
           cache_limit: '4'
@@ -399,6 +471,7 @@ jobs:
           stage: ${{ inputs.stage }}
           shard: ${{ steps.selection.outputs.shard }}
           target: ${{ steps.selection.outputs.target }}
+          ninja_file: ${{ steps.selection.outputs.ninja_file }}
           part: '3'
           budget: '205'
           cache_limit: '6'
@@ -411,6 +484,7 @@ jobs:
           stage: ${{ inputs.stage }}
           shard: ${{ steps.selection.outputs.shard }}
           target: ${{ steps.selection.outputs.target }}
+          ninja_file: ${{ steps.selection.outputs.ninja_file }}
           part: '4'
           budget: '265'
           cache_limit: '8'
@@ -496,13 +570,14 @@ jobs:
         env:
           LITE_BUILD_PHASE: ${{ steps.selection.outputs.phase }}
           LITE_PHASE_COMPLETE: ${{ steps.result.outputs.compile_outcome == 'complete' && 'true' || 'false' }}
+          LITE_PHASE_MODE: ${{ inputs.shared_mode }}
         run: |
           phase_tool=src/brave/build/ci/lite_stage_phase.py
           if [[ -f .lite-tools/build/ci/lite_stage_phase.py ]]; then
             phase_tool=.lite-tools/build/ci/lite_stage_phase.py
           fi
           python3 "$phase_tool" record --manifest "$RUNNER_TEMP/lite-checkpoint/manifest.json" \
-            --phase "$LITE_BUILD_PHASE" --complete "$LITE_PHASE_COMPLETE"
+            --phase "$LITE_BUILD_PHASE" --complete "$LITE_PHASE_COMPLETE" --mode "$LITE_PHASE_MODE"
 
       - name: Upload checkpoint manifest
         id: upload_checkpoint_manifest

@@ -24,7 +24,7 @@ on:
         type: string
         default: ''
       start_phase:
-        description: Initial target phase for a new build (1–8; default 5)
+        description: Initial target phase (1–8) or shared for assembly
         type: string
         default: '5'
       shards_run_id:
@@ -49,7 +49,7 @@ permissions:
 
 jobs:
   shards:
-    if: inputs.shards_run_id == '' && inputs.resume_stage == '0'
+    if: inputs.shards_run_id == '' && inputs.resume_stage == '0' && inputs.start_phase != 'shared'
     strategy:
       fail-fast: false
       matrix:
@@ -82,6 +82,7 @@ jobs:
       restore_attempt: ${{ inputs.resume_attempt || '1' }}
       source_commit: ${{ inputs.resume_source_commit || github.sha }}
       rescue_cache: ${{ inputs.rescue_cache || '' }}
+      shared_mode: ${{ inputs.start_phase == 'shared' && 'assembly' || 'normal' }}
       start_phase: ${{ inputs.start_phase || '5' }}
       shards_run_id: ${{ inputs.shards_run_id || (inputs.resume_stage != '' && inputs.resume_stage != '0' && inputs.resume_run_id) || format('{0}', github.run_id) }}
       shards_attempt: ${{ (inputs.shards_run_id != '' && (inputs.shards_attempt || '1')) || (inputs.resume_stage != '' && inputs.resume_stage != '0' && inputs.resume_attempt) || format('{0}', github.run_attempt) }}
@@ -97,6 +98,7 @@ jobs:
       restore_attempt: ${{ needs.stage1.outputs.attempt }}
       source_commit: ${{ inputs.resume_source_commit || github.sha }}
       rescue_cache: ${{ inputs.rescue_cache || '' }}
+      shared_mode: ${{ inputs.start_phase == 'shared' && 'assembly' || 'normal' }}
       shards_run_id: ${{ inputs.shards_run_id || (inputs.resume_stage != '' && inputs.resume_stage != '0' && inputs.resume_run_id) || format('{0}', github.run_id) }}
       shards_attempt: ${{ (inputs.shards_run_id != '' && (inputs.shards_attempt || '1')) || (inputs.resume_stage != '' && inputs.resume_stage != '0' && inputs.resume_attempt) || format('{0}', github.run_attempt) }}
 
@@ -111,6 +113,7 @@ jobs:
       restore_attempt: ${{ needs.stage2.outputs.attempt }}
       source_commit: ${{ inputs.resume_source_commit || github.sha }}
       rescue_cache: ${{ inputs.rescue_cache || '' }}
+      shared_mode: ${{ inputs.start_phase == 'shared' && 'assembly' || 'normal' }}
       shards_run_id: ${{ inputs.shards_run_id || (inputs.resume_stage != '' && inputs.resume_stage != '0' && inputs.resume_run_id) || format('{0}', github.run_id) }}
       shards_attempt: ${{ (inputs.shards_run_id != '' && (inputs.shards_attempt || '1')) || (inputs.resume_stage != '' && inputs.resume_stage != '0' && inputs.resume_attempt) || format('{0}', github.run_attempt) }}
 
@@ -125,6 +128,7 @@ jobs:
       restore_attempt: ${{ needs.stage3.outputs.attempt }}
       source_commit: ${{ inputs.resume_source_commit || github.sha }}
       rescue_cache: ${{ inputs.rescue_cache || '' }}
+      shared_mode: ${{ inputs.start_phase == 'shared' && 'assembly' || 'normal' }}
       shards_run_id: ${{ inputs.shards_run_id || (inputs.resume_stage != '' && inputs.resume_stage != '0' && inputs.resume_run_id) || format('{0}', github.run_id) }}
       shards_attempt: ${{ (inputs.shards_run_id != '' && (inputs.shards_attempt || '1')) || (inputs.resume_stage != '' && inputs.resume_stage != '0' && inputs.resume_attempt) || format('{0}', github.run_attempt) }}
 
@@ -139,6 +143,7 @@ jobs:
       restore_attempt: ${{ needs.stage4.outputs.attempt }}
       source_commit: ${{ inputs.resume_source_commit || github.sha }}
       rescue_cache: ${{ inputs.rescue_cache || '' }}
+      shared_mode: ${{ inputs.start_phase == 'shared' && 'assembly' || 'normal' }}
       shards_run_id: ${{ inputs.shards_run_id || (inputs.resume_stage != '' && inputs.resume_stage != '0' && inputs.resume_run_id) || format('{0}', github.run_id) }}
       shards_attempt: ${{ (inputs.shards_run_id != '' && (inputs.shards_attempt || '1')) || (inputs.resume_stage != '' && inputs.resume_stage != '0' && inputs.resume_attempt) || format('{0}', github.run_attempt) }}
 
@@ -153,6 +158,7 @@ jobs:
       restore_attempt: ${{ needs.stage5.outputs.attempt }}
       source_commit: ${{ inputs.resume_source_commit || github.sha }}
       rescue_cache: ${{ inputs.rescue_cache || '' }}
+      shared_mode: ${{ inputs.start_phase == 'shared' && 'assembly' || 'normal' }}
       shards_run_id: ${{ inputs.shards_run_id || (inputs.resume_stage != '' && inputs.resume_stage != '0' && inputs.resume_run_id) || format('{0}', github.run_id) }}
       shards_attempt: ${{ (inputs.shards_run_id != '' && (inputs.shards_attempt || '1')) || (inputs.resume_stage != '' && inputs.resume_stage != '0' && inputs.resume_attempt) || format('{0}', github.run_attempt) }}
 
@@ -167,6 +173,7 @@ jobs:
       restore_attempt: ${{ needs.stage6.outputs.attempt }}
       source_commit: ${{ inputs.resume_source_commit || github.sha }}
       rescue_cache: ${{ inputs.rescue_cache || '' }}
+      shared_mode: ${{ inputs.start_phase == 'shared' && 'assembly' || 'normal' }}
       shards_run_id: ${{ inputs.shards_run_id || (inputs.resume_stage != '' && inputs.resume_stage != '0' && inputs.resume_run_id) || format('{0}', github.run_id) }}
       shards_attempt: ${{ (inputs.shards_run_id != '' && (inputs.shards_attempt || '1')) || (inputs.resume_stage != '' && inputs.resume_stage != '0' && inputs.resume_attempt) || format('{0}', github.run_attempt) }}
 
@@ -181,6 +188,7 @@ jobs:
       restore_attempt: ${{ needs.stage7.outputs.attempt }}
       source_commit: ${{ inputs.resume_source_commit || github.sha }}
       rescue_cache: ${{ inputs.rescue_cache || '' }}
+      shared_mode: ${{ inputs.start_phase == 'shared' && 'assembly' || 'normal' }}
       shards_run_id: ${{ inputs.shards_run_id || (inputs.resume_stage != '' && inputs.resume_stage != '0' && inputs.resume_run_id) || format('{0}', github.run_id) }}
       shards_attempt: ${{ (inputs.shards_run_id != '' && (inputs.shards_attempt || '1')) || (inputs.resume_stage != '' && inputs.resume_stage != '0' && inputs.resume_attempt) || format('{0}', github.run_attempt) }}
 

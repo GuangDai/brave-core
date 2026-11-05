@@ -99,8 +99,13 @@ jobs:
           SECOND: ${{ steps.second.outputs.outcome }}
           THIRD: ${{ steps.third.outputs.outcome }}
           FOURTH: ${{ steps.fourth.outputs.outcome }}
+          SAVED_1: ${{ steps.first.outputs.cache_saved }}
+          SAVED_2: ${{ steps.second.outputs.cache_saved }}
+          SAVED_3: ${{ steps.third.outputs.cache_saved }}
+          SAVED_4: ${{ steps.fourth.outputs.cache_saved }}
         run: |
           [[ "$FIRST" == checkpoint && "$SECOND" == complete && "$THIRD" == complete && "$FOURTH" == failed ]]
+          [[ "$SAVED_1" == true && "$SAVED_2" == false && "$SAVED_3" == true && "$SAVED_4" == true ]]
       - uses: actions/download-artifact@v4
         with:
           pattern: brave-lite-stage-1-shard-1-part-*-a${{ github.run_attempt }}
