@@ -48,6 +48,13 @@ class BrowserVerifyTest(unittest.TestCase):
         self.binary.chmod(0o755)
         self.output = self.root / 'results'
 
+    def test_restored_browser_features_have_matching_tests(self):
+        expected = lite_browser_verify.selected_tests(False)
+        self.assertIn('BraveAutofillBrowserTest.AutofillIsNotAllowedInPrivateWindows', expected)
+        self.assertIn('PasswordManagerTest.SavePasswordAndOpenSettingsNoErrors', expected)
+        self.assertIn('InProcessBrowserTest.TranslationIsUnavailable', expected)
+        self.assertNotIn('BraveAppMenuModelBrowserTest.PasswordsAndAutofillMenuIsAbsent', expected)
+
     def test_success_checks_all_base_and_overlay_tests(self):
         with patch.dict(os.environ, {'FAKE_MODE': 'success'}):
             lite_browser_verify.verify(self.binary, self.output, overlay=True)

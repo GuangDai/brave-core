@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test checkpoint provenance and the isolated translation-test overlay."""
+"""Test checkpoint provenance and the isolated browser-test overlay."""
 
 import json
 import os
@@ -28,11 +28,17 @@ class BrowserCheckpointTest(unittest.TestCase):
             plistlib.dump({'CFBundleExecutable': 'Fixture'}, output)
         (self.app / 'MacOS/Fixture').write_bytes(b'app executable')
         self.brave = self.root / 'src/brave'
-        (self.brave / Path(guard.TEST_PATH).parent).mkdir(parents=True)
+        for test_path in guard.TEST_BLOBS:
+            (self.brave / Path(test_path).parent).mkdir(parents=True, exist_ok=True)
         subprocess.run(['git', 'init', '-q', str(self.brave)], check=True)
-        source = subprocess.check_output(['git', 'show', f'{guard.SOURCE}:{guard.TEST_PATH}'],
-                                         cwd=Path(__file__).resolve().parents[2])
-        (self.brave / guard.TEST_PATH).write_bytes(source)
+        for test_path in guard.TEST_BLOBS:
+            source = subprocess.check_output(['git', 'show', f'{guard.SOURCE}:{test_path}'],
+                                             cwd=Path(__file__).resolve().parents[2])
+            (self.brave / test_path).write_bytes(source)
+        subprocess.run(['git', 'config', 'user.name', 'Fixture'], cwd=self.brave, check=True)
+        subprocess.run(['git', 'config', 'user.email', 'fixture@example.invalid'], cwd=self.brave, check=True)
+        subprocess.run(['git', 'add', *guard.TEST_BLOBS], cwd=self.brave, check=True)
+        subprocess.run(['git', 'commit', '-qm', 'Fixture sources'], cwd=self.brave, check=True)
         self.manifest = {'identity': {'commit': guard.SOURCE, 'repository': 'example/project',
                                       'architecture': 'arm64'}, 'build_phase': 6,
                          'phase_complete': True}
@@ -76,6 +82,29 @@ class BrowserCheckpointTest(unittest.TestCase):
         wrong.write_text('bm90IHRoZSB0ZXN0IHBhdGNo')
         with self.assertRaisesRegex(ValueError, 'overlay identity'):
             guard.prepare_overlay(self.brave, guard.SOURCE, True, wrong)
+
+    def test_rejects_modified_or_partially_applied_sources(self):
+        paths = list(guard.TEST_BLOBS)
+        source = self.brave / paths[0]
+        source.write_bytes(source.read_bytes() + b'\n// unexpected change\n')
+        with self.assertRaisesRegex(ValueError, 'sources do not match'):
+            guard.prepare_overlay(self.brave, guard.SOURCE, True, self.patch)
+        subprocess.run(['git', 'checkout', '--', paths[0]], cwd=self.brave, check=True)
+        guard.prepare_overlay(self.brave, guard.SOURCE, True, self.patch)
+        subprocess.run(['git', 'checkout', '--', paths[0]], cwd=self.brave, check=True)
+        with self.assertRaisesRegex(ValueError, 'sources do not match'):
+            guard.prepare_overlay(self.brave, guard.SOURCE, True, self.patch)
+
+    def test_disabled_overlay_rejects_staged_and_unstaged_changes(self):
+        guard.prepare_overlay(self.brave, guard.SOURCE, False, self.patch)
+        test_path = next(iter(guard.TEST_BLOBS))
+        source = self.brave / test_path
+        source.write_bytes(source.read_bytes() + b'\n// unexpected change\n')
+        with self.assertRaises(subprocess.CalledProcessError):
+            guard.prepare_overlay(self.brave, guard.SOURCE, False, self.patch)
+        subprocess.run(['git', 'add', test_path], cwd=self.brave, check=True)
+        with self.assertRaises(subprocess.CalledProcessError):
+            guard.prepare_overlay(self.brave, guard.SOURCE, False, self.patch)
 
 
 if __name__ == '__main__':

@@ -28,23 +28,18 @@ checksums are uploaded independently. The application executable's SHA-256 is
 checked before and after building tests. This verifies the executable only;
 the original app artifact remains the reference for the complete package.
 
-The optional translation overlay applies only to source commit
-`0ac016891784896ca1517df800a8364b5e964162`. It is the single-file test diff
-from commit `480a92b7ca825b46140ed723e8780332a0ded611`, decoded and checked
-against SHA-256 `cff1de84e2b884c532e6c298ef354557481ce8ff0281dba5330c03b075c65e2c`.
-The original and patched source blobs are also checked. The overlay is applied
-only in the disposable restored test workspace, and its provenance is saved
-with the test results and verification checkpoint. It changes test code, so
-the test binary is not byte-identical to the released app.
+The optional test overlay applies only to the pinned application source listed
+in `lite_browser_checkpoint.py`. Its patch and the original and patched test
+source blobs are checked before use. The overlay is applied only in the
+disposable restored test workspace, and its provenance is saved with the test
+results and verification checkpoint. It changes test code, so the test binary
+is not byte-identical to the released app.
 
 All test artifacts use `brave-lite-verify-*` or
 `brave-lite-browser-test-results-*` names. They are intentionally distinct from
-production app checkpoints and caches. The existing local backup and portable
-cache-recovery scripts do **not** yet recognize these verification names; do
-not start a real verification build until those scripts have been adapted and
-tested. `build/ci/lite_browser_backup_verify.py` provides independent,
-read-only verification of downloaded cache, checkpoint and results directories;
-it is not an automatic downloader. Its `--help` lists the required repository,
+production app checkpoints and caches. `build/ci/lite_browser_backup_verify.py`
+provides independent, read-only verification of artifact directories; it is not
+an automatic downloader. Its `--help` lists the required repository,
 source, workflow commit, application SHA-256, overlay setting and checkpoint
 attempt. Obtain the expected application SHA-256 from the original authenticated
 application or checkpoint, and the expected workflow commit from the artifact's
@@ -55,8 +50,11 @@ provenance, controller and launcher logs, the exact test list and a passing
 summary. A valid incomplete artifact is reported with its actual status, not as
 a successful test. Checksums detect accidental corruption; their authenticity
 depends on the trusted source of the expected values and artifact download.
-Without full integration, download test artifacts manually before GitHub
-retention expires. Browser test execution may also need a working macOS
-graphical session; real CI behavior and full Chromium-scale disk/time costs are
-unverified. The current tests check internal disabled state and entries; they
-do not yet prove real saved-data preservation or every form-fill behavior.
+The default test set checks Autofill and password filling enablement in ordinary
+and private windows, password-store insertion and password-manager page
+navigation, and the disabled translation preference. The optional overlay also
+checks the manual translation path and strengthens the password-list check.
+These tests do not exercise third-party extensions, Passkeys, actual form
+filling, or existing saved-data migration. Browser test execution may also need
+a working macOS graphical session; real CI behavior and Chromium-scale
+disk/time costs remain unverified. GitHub artifact retention limits apply.

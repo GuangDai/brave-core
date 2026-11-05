@@ -14,12 +14,20 @@ import sys
 
 
 KIND = 'brave-lite-browser-verification-v1'
-SOURCE = '0ac016891784896ca1517df800a8364b5e964162'
-OVERLAY_COMMIT = '480a92b7ca825b46140ed723e8780332a0ded611'
-OVERLAY_SHA256 = 'cff1de84e2b884c532e6c298ef354557481ce8ff0281dba5330c03b075c65e2c'
-ORIGINAL_BLOB = '5d8c8108184b0fb31c1b9ada7fe8956318b15b38'
-OVERLAY_BLOB = '060298a628f181015055d8aa8008cfdb70dd7927'
-TEST_PATH = 'browser/translate/brave_translate_browsertest.cc'
+SOURCE = '794c9cbc789fa7bbbb912ff7b8c1a00f53e11abf'
+OVERLAY_COMMIT = '30ec106c936b11d8ab0390c18ea43c455f42180c'
+OVERLAY_SHA256 = '5a90080662affaa9d21d7eed8a1d895aec1a44ab62947843e4cb74bd89bd9bde'
+# Each pair is the exact Git blob before and after applying the test-only patch.
+TEST_BLOBS = {
+    'browser/password_manager/password_manager_browsertest.cc': (
+        'dc3c7731d1bab823752d7fca74256dd3b9d61cd2',
+        'b5542015316e24d0812bd861bebbbf57162f0f95',
+    ),
+    'browser/translate/brave_translate_browsertest.cc': (
+        '5d8c8108184b0fb31c1b9ada7fe8956318b15b38',
+        '060298a628f181015055d8aa8008cfdb70dd7927',
+    ),
+}
 
 
 def sha256(path):
@@ -56,7 +64,7 @@ def validate_checkpoint(manifest, source, overlay, namespace):
     else:
         raise ValueError('Invalid checkpoint namespace')
     if overlay and source != SOURCE:
-        raise ValueError('Translation test overlay requires the pinned source commit')
+        raise ValueError('Browser test overlay requires the pinned source commit')
 
 
 def app_digest(workspace):
@@ -75,22 +83,28 @@ def app_digest(workspace):
 
 
 def prepare_overlay(brave, source, enabled, patch_path):
-    test_file = brave / TEST_PATH
     if not enabled:
-        subprocess.run(['git', 'diff', '--quiet', '--', TEST_PATH], cwd=brave, check=True)
+        subprocess.run(['git', 'diff', 'HEAD', '--quiet', '--', *TEST_BLOBS], cwd=brave, check=True)
         return ''
     patch = base64.b64decode(patch_path.read_bytes().strip(), validate=True)
     if source != SOURCE or hashlib.sha256(patch).hexdigest() != OVERLAY_SHA256:
-        raise ValueError('Translation test overlay identity differs')
-    blob = subprocess.check_output(['git', 'hash-object', str(test_file)], cwd=brave, text=True).strip()
-    if blob == ORIGINAL_BLOB:
+        raise ValueError('Browser test overlay identity differs')
+
+    def blobs():
+        return tuple(subprocess.check_output(['git', 'hash-object', str(brave / path)],
+                                             cwd=brave, text=True).strip()
+                     for path in TEST_BLOBS)
+
+    original = tuple(pair[0] for pair in TEST_BLOBS.values())
+    applied = tuple(pair[1] for pair in TEST_BLOBS.values())
+    current = blobs()
+    if current == original:
         subprocess.run(['git', 'apply', '--check', '-'], cwd=brave, input=patch, check=True)
         subprocess.run(['git', 'apply', '-'], cwd=brave, input=patch, check=True)
-    elif blob != OVERLAY_BLOB:
-        raise ValueError('Translation test source does not match either pinned version')
-    current = subprocess.check_output(['git', 'hash-object', str(test_file)], cwd=brave, text=True).strip()
-    if current != OVERLAY_BLOB:
-        raise ValueError('Applied translation test overlay differs')
+    elif current != applied:
+        raise ValueError('Browser test sources do not match either pinned version')
+    if blobs() != applied:
+        raise ValueError('Applied browser test overlay differs')
     return OVERLAY_SHA256
 
 

@@ -11,7 +11,7 @@ import sys
 
 BASE_TESTS = (
     'BraveAutofillBrowserTest.AutofillIsNotAllowedInPrivateWindows',
-    'BraveAppMenuModelBrowserTest.PasswordsAndAutofillMenuIsAbsent',
+    'PasswordManagerTest.SavePasswordAndOpenSettingsNoErrors',
     'InProcessBrowserTest.TranslationIsUnavailable',
 )
 OVERLAY_TEST = 'BraveTranslateBrowserTest.ManualTranslationIsUnavailable'
