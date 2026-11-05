@@ -86,6 +86,7 @@ jobs:
           sparse-checkout: |
             build/ci
             .github/actions/lite-stage-cache-phase
+            .github/actions/lite-publish-app
           fetch-depth: 1
           persist-credentials: false
 
@@ -435,44 +436,11 @@ jobs:
           STATUS_4: ${{ steps.part4.outcome }}
         run: python3 .lite-tools/build/ci/lite_stage_result.py
 
-      - name: Verify the browser
+      - name: Verify and preserve the app
         if: steps.result.outputs.outcome == 'complete'
-        working-directory: src/brave
-        run: |
-          python3 build/ci/lite_verify_build.py \
-            --build "$GITHUB_WORKSPACE/src/out/Static_arm64" \
-            --profile "$RUNNER_TEMP/lite-smoke-profile"
-
-      - name: Package the app
-        if: steps.result.outputs.outcome == 'complete'
-        shell: bash
-        run: |
-          set -euo pipefail
-          app=$(find "$GITHUB_WORKSPACE/src/out/Static_arm64" -maxdepth 1 -name '*.app' -type d -print -quit)
-          test -n "$app"
-          ditto -c -k --sequesterRsrc --keepParent "$app" "$RUNNER_TEMP/Brave-Lite-macOS-arm64.zip"
-          python3 - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-          info = {"source_commit": os.environ["LITE_SOURCE_COMMIT"],
-                  "workflow_commit": os.environ["GITHUB_SHA"]}
-          (Path(os.environ["RUNNER_TEMP"]) / "BUILD_PROVENANCE.json").write_text(
-              json.dumps(info, indent=2) + "\n")
-          PY
-          (cd "$RUNNER_TEMP" && shasum -a 256 Brave-Lite-macOS-arm64.zip BUILD_PROVENANCE.json > SHA256SUMS.txt)
-
-      - name: Upload the app
-        if: steps.result.outputs.outcome == 'complete'
-        uses: actions/upload-artifact@v4
+        uses: ./.lite-tools/.github/actions/lite-publish-app
         with:
-          name: Brave-Lite-macOS-arm64-stage-${{ inputs.stage }}
-          path: |
-            ${{ runner.temp }}/Brave-Lite-macOS-arm64.zip
-            ${{ runner.temp }}/BUILD_PROVENANCE.json
-            ${{ runner.temp }}/SHA256SUMS.txt
-          if-no-files-found: error
-          retention-days: 90
+          stage: ${{ inputs.stage }}
 
       - name: Save build checkpoint
         id: checkpoint

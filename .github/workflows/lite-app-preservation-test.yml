@@ -1,0 +1,94 @@
+name: Test preservation of a built macOS app
+
+on:
+  push:
+    branches: [ci/preserve-app]
+    paths:
+      - .github/actions/lite-publish-app/**
+      - .github/workflows/lite-app-preservation-test.yml
+      - build/ci/lite_verify_build.py
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-26
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - verification: success
+            stage: '7'
+          - verification: failure
+            stage: '8'
+    env:
+      LITE_SOURCE_COMMIT: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: src/brave
+          persist-credentials: false
+      - name: Create a synthetic app and build flags
+        env:
+          EXPECTED_VERIFICATION: ${{ matrix.verification }}
+        run: |
+          python3 - <<'PY'
+          import importlib.util
+          import os
+          from pathlib import Path
+          import plistlib
+          root = Path(os.environ['GITHUB_WORKSPACE'])
+          build = root / 'src/out/Static_arm64'
+          spec = importlib.util.spec_from_file_location('verify', root / 'src/brave/build/ci/lite_verify_build.py')
+          verify = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(verify)
+          for header, flag in verify.FLAGS.items():
+              path = build / 'gen' / header
+              path.parent.mkdir(parents=True, exist_ok=True)
+              value = 1 if flag == 'ENABLE_BRAVE_WALLET' and os.environ['EXPECTED_VERIFICATION'] == 'failure' else 0
+              path.write_text(f'#define BUILDFLAG_INTERNAL_{flag}() ({value})\n')
+          contents = build / 'Fixture.app/Contents'
+          (contents / 'MacOS').mkdir(parents=True)
+          with (contents / 'Info.plist').open('wb') as output:
+              plistlib.dump({'CFBundleExecutable': 'Fixture'}, output)
+          binary = contents / 'MacOS/Fixture'
+          binary.write_text('#!/bin/sh\nif [ "$1" = "--version" ]; then echo Fixture; else echo brave-lite-smoke-ok; fi\n')
+          binary.chmod(0o755)
+          PY
+      - name: Publish the fixture
+        id: publish
+        continue-on-error: true
+        uses: ./src/brave/.github/actions/lite-publish-app
+        with:
+          stage: ${{ matrix.stage }}
+      - name: Check the verification result
+        env:
+          EXPECTED: ${{ matrix.verification }}
+          ACTION_OUTCOME: ${{ steps.publish.outcome }}
+          VERIFY_OUTCOME: ${{ steps.publish.outputs.verification }}
+        run: |
+          [[ "$ACTION_OUTCOME" == "$EXPECTED" ]]
+          [[ "$VERIFY_OUTCOME" == "$EXPECTED" ]]
+      - uses: actions/download-artifact@v4
+        with:
+          name: Brave-Lite-macOS-arm64-stage-${{ matrix.stage }}
+          path: ${{ runner.temp }}/saved-app
+      - name: Check the preserved app and provenance
+        env:
+          EXPECTED: ${{ matrix.verification }}
+        run: |
+          cd "$RUNNER_TEMP/saved-app"
+          shasum -a 256 -c SHA256SUMS.txt
+          unzip -t Brave-Lite-macOS-arm64.zip
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          data = json.loads(Path('BUILD_PROVENANCE.json').read_text())
+          assert data['browser_verification'] == os.environ['EXPECTED']
+          assert data['source_commit'] == os.environ['GITHUB_SHA']
+          PY

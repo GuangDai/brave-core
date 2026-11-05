@@ -1,0 +1,90 @@
+name: Verify and preserve a built macOS app
+description: Upload the built app even when its smoke test fails.
+
+inputs:
+  stage:
+    description: Build stage number used in the artifact name
+    required: true
+
+outputs:
+  verification:
+    description: Outcome of the browser verification
+    value: ${{ steps.verify.outcome }}
+
+runs:
+  using: composite
+  steps:
+    - name: Verify the browser
+      id: verify
+      continue-on-error: true
+      shell: bash
+      working-directory: ${{ github.workspace }}/src/brave
+      run: |
+        python3 build/ci/lite_verify_build.py \
+          --build "$GITHUB_WORKSPACE/src/out/Static_arm64" \
+          --profile "$RUNNER_TEMP/lite-smoke-profile"
+
+    - name: Package the app and record verification
+      shell: bash
+      env:
+        LITE_VERIFY_STATUS: ${{ steps.verify.outcome }}
+      run: |
+        set -euo pipefail
+        app=$(find "$GITHUB_WORKSPACE/src/out/Static_arm64" -maxdepth 1 -name '*.app' -type d -print -quit)
+        test -n "$app"
+        ditto -c -k --sequesterRsrc --keepParent "$app" "$RUNNER_TEMP/Brave-Lite-macOS-arm64.zip"
+        python3 - <<'PY'
+        import json
+        import os
+        from pathlib import Path
+        info = {"source_commit": os.environ["LITE_SOURCE_COMMIT"],
+                "workflow_commit": os.environ["GITHUB_SHA"],
+                "browser_verification": os.environ["LITE_VERIFY_STATUS"]}
+        (Path(os.environ["RUNNER_TEMP"]) / "BUILD_PROVENANCE.json").write_text(
+            json.dumps(info, indent=2) + "\n")
+        PY
+        (cd "$RUNNER_TEMP" && shasum -a 256 Brave-Lite-macOS-arm64.zip BUILD_PROVENANCE.json > SHA256SUMS.txt)
+
+    - name: Upload the app
+      id: upload
+      continue-on-error: true
+      uses: actions/upload-artifact@v4
+      with:
+        name: Brave-Lite-macOS-arm64-stage-${{ inputs.stage }}
+        path: |
+          ${{ runner.temp }}/Brave-Lite-macOS-arm64.zip
+          ${{ runner.temp }}/BUILD_PROVENANCE.json
+          ${{ runner.temp }}/SHA256SUMS.txt
+        if-no-files-found: error
+        retention-days: 90
+
+    - name: Retry the app upload once
+      id: retry
+      if: steps.upload.outcome == 'failure'
+      continue-on-error: true
+      uses: actions/upload-artifact@v4
+      with:
+        name: Brave-Lite-macOS-arm64-stage-${{ inputs.stage }}
+        path: |
+          ${{ runner.temp }}/Brave-Lite-macOS-arm64.zip
+          ${{ runner.temp }}/BUILD_PROVENANCE.json
+          ${{ runner.temp }}/SHA256SUMS.txt
+        if-no-files-found: error
+        retention-days: 90
+
+    - name: Report verification and upload status
+      if: always()
+      shell: bash
+      env:
+        VERIFY_STATUS: ${{ steps.verify.outcome }}
+        UPLOAD_STATUS: ${{ steps.upload.outcome }}
+        RETRY_STATUS: ${{ steps.retry.outcome }}
+      run: |
+        if [[ "$UPLOAD_STATUS" != success && "$RETRY_STATUS" != success ]]; then
+          echo '::error::The built app could not be uploaded.'
+          exit 1
+        fi
+        if [[ "$VERIFY_STATUS" != success ]]; then
+          echo '::error::The built app was saved, but browser verification failed.'
+          exit 1
+        fi
