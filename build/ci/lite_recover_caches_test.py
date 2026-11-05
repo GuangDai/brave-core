@@ -71,6 +71,14 @@ class CacheRecoveryTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "identity"):
             recovery.verified_backends([self.artifacts], "GuangDai/brave-core")
 
+    def test_valid_artifact_can_be_selected_without_a_corrupt_sibling(self):
+        good = self.artifact("brave-lite-shard-1-part-1-a1", "1", 1)
+        bad = self.artifact("brave-lite-shard-2-part-1-a1", "2", 1)
+        (bad / "cache/aa/entry").write_bytes(b"corrupt")
+        with self.assertRaisesRegex(ValueError, "differ"):
+            recovery.verified_backends([self.artifacts], "GuangDai/brave-core")
+        self.assertEqual(recovery.verified_backends([good], "GuangDai/brave-core"), [good / "cache"])
+
     def test_non_integer_file_size_is_rejected(self):
         path = self.artifact("brave-lite-shard-1-part-1-a1", "1", 1)
         manifest_path = path / "manifest.json"

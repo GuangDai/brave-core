@@ -87,21 +87,22 @@ printing shell settings. For example, from the Brave Core checkout:
 
 ```sh
 env_file=$(mktemp -t brave-lite-cache-env)
-if python3 build/ci/lite_recover_caches.py \
+python3 build/ci/lite_recover_caches.py \
   --root /path/to/downloaded-artifacts --repository GuangDai/brave-core \
   --workspace /path/to/workspace --writable-cache /path/to/separate-new-cache \
-  > "$env_file"; then
-  source "$env_file"
-fi
+  > "$env_file" && source "$env_file"
 ```
 
 The generated settings retain the downloaded directories as separate read-only
 backends and save new compiler results in `--writable-cache`. That directory
 must be separate from the downloaded artifacts. Ccache will not automatically
-trim the writable remote cache, so its disk usage can grow; keep sufficient
-free space. Roots are searched in command-line order, with newer run IDs and
-later parts preferred within each root. `--check-only` verifies the downloaded
-artifacts without printing shell settings and works on non-Mac hosts too.
+trim the writable remote cache, so its disk usage can grow; the CI stages' 8 GiB
+limit does not apply on the Mac. Keep sufficient free space. Roots are searched
+in command-line order, with newer run IDs and later parts preferred within each
+root. A corrupt artifact rejects the invocation; to recover the other parts,
+pass their individual artifact directories as separate `--root` arguments.
+`--check-only` verifies the downloaded artifacts without printing shell
+settings and works on non-Mac hosts too.
 
 Use the same `Static` build arguments and `--gn=cc_wrapper:ccache` shown in the
 workflow. Different compiler, source, SDK or paths can cause misses. Downloaded
