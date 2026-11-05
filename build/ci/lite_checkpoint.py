@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import subprocess
 import sys
 
@@ -111,15 +112,7 @@ def save(workspace, destination, build_identity, volume_bytes=DEFAULT_VOLUME_BYT
     print(f"Saved {len(volumes)} verified checkpoint volume(s)", flush=True)
 
 
-def restore(workspace, source, build_identity):
-    workspace, source = workspace.resolve(), source.resolve()
-    if source.is_relative_to(workspace):
-        raise ValueError("Checkpoint source must be outside the workspace")
-    workspace.mkdir(parents=True, exist_ok=True)
-    unexpected = [p.name for p in workspace.iterdir() if p.name != ".lite-tools"]
-    if unexpected:
-        raise RuntimeError(f"Restore workspace is not empty: {unexpected}")
-    manifest = json.loads((source / MANIFEST).read_text())
+def validate_manifest(manifest, build_identity):
     saved_identity = manifest.get("identity")
     if manifest.get("version") != 1 or not compatible_identity(saved_identity, build_identity):
         raise RuntimeError("Checkpoint repository, commit or toolchain differs")
@@ -128,11 +121,32 @@ def restore(workspace, source, build_identity):
     volumes = manifest.get("volumes")
     if not isinstance(volumes, list) or not 1 <= len(volumes) <= MAX_VOLUMES:
         raise RuntimeError("Invalid checkpoint volume list")
-    paths = []
     for index, volume in enumerate(volumes):
         expected_name = f"part-a{chr(ord('a') + index)}"
-        if not isinstance(volume, dict) or volume.get("name") != expected_name:
+        if (not isinstance(volume, dict) or volume.get("name") != expected_name
+                or not isinstance(volume.get("size"), int) or volume["size"] <= 0
+                or not re.fullmatch(r"[a-f0-9]{64}", str(volume.get("sha256", "")))):
             raise RuntimeError("Checkpoint volumes are missing or out of order")
+    return volumes
+
+
+def prepare_workspace(workspace):
+    workspace.mkdir(parents=True, exist_ok=True)
+    unexpected = [p.name for p in workspace.iterdir() if p.name != ".lite-tools"]
+    if unexpected:
+        raise RuntimeError(f"Restore workspace is not empty: {unexpected}")
+
+
+def restore(workspace, source, build_identity):
+    workspace, source = workspace.resolve(), source.resolve()
+    if source.is_relative_to(workspace):
+        raise ValueError("Checkpoint source must be outside the workspace")
+    prepare_workspace(workspace)
+    manifest = json.loads((source / MANIFEST).read_text())
+    volumes = validate_manifest(manifest, build_identity)
+    paths = []
+    for volume in volumes:
+        expected_name = volume["name"]
         path = source / expected_name
         if (not path.is_file() or path.stat().st_size != volume.get("size")
                 or digest(path) != volume.get("sha256")):

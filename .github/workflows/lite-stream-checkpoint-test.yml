@@ -1,0 +1,173 @@
+name: Streamed checkpoint handoff experiment
+
+on:
+  push:
+    branches: [ci/streaming-checkpoints]
+    paths:
+      - .github/workflows/lite-stream-checkpoint-test.yml
+      - build/ci/lite_checkpoint.py
+      - build/ci/lite_stream_checkpoint.py
+      - build/ci/lite_stream_checkpoint_test.py
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Test streamed restore and credential handling
+        run: python3 build/ci/lite_stream_checkpoint_test.py -v
+      - name: Create checkpoint volumes
+        run: |
+          PYTHONPATH=build/ci python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import random
+          import lite_checkpoint
+          temp = Path(os.environ['RUNNER_TEMP'])
+          work = temp / 'lite-workspace'
+          work.mkdir()
+          (work / 'object.o').write_bytes(random.Random(13).randbytes(250_000))
+          ident = {'repository': os.environ['GITHUB_REPOSITORY'], 'commit': os.environ['GITHUB_SHA'],
+                   'workspace': '/fixture', 'architecture': 'arm64', 'image_os': 'macos26',
+                   'image_version': 'fixture', 'macos_version': '26.6.2',
+                   'xcode_version': '26.6', 'sdk_version': '26.5'}
+          lite_checkpoint.save(work, temp / 'checkpoint', ident, 100_000)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brave-lite-s1-a${{ github.run_attempt }}-manifest
+          path: ${{ runner.temp }}/checkpoint/manifest.json
+          if-no-files-found: error
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brave-lite-s1-a${{ github.run_attempt }}-part-aa
+          path: ${{ runner.temp }}/checkpoint/part-aa
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brave-lite-s1-a${{ github.run_attempt }}-part-ab
+          path: ${{ runner.temp }}/checkpoint/part-ab
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brave-lite-s1-a${{ github.run_attempt }}-part-ac
+          path: ${{ runner.temp }}/checkpoint/part-ac
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+      - uses: actions/download-artifact@v4
+        with:
+          name: brave-lite-s1-a${{ github.run_attempt }}-manifest
+          path: ${{ runner.temp }}/manifest
+      - name: Stream all volumes into the restored workspace
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PYTHONPATH=build/ci python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import random
+          import lite_stream_checkpoint
+          temp = Path(os.environ['RUNNER_TEMP'])
+          ident = {'repository': os.environ['GITHUB_REPOSITORY'], 'commit': os.environ['GITHUB_SHA'],
+                   'workspace': '/fixture', 'architecture': 'arm64', 'image_os': 'macos26',
+                   'image_version': 'fixture', 'macos_version': '26.6.2',
+                   'xcode_version': '26.6', 'sdk_version': '26.5'}
+          manifest = json.loads((temp / 'manifest' / 'manifest.json').read_text())
+          lite_stream_checkpoint.restore(temp / 'restored', manifest, ident,
+                                        os.environ['GITHUB_REPOSITORY'], os.environ['GITHUB_RUN_ID'],
+                                        os.environ['GITHUB_RUN_ATTEMPT'], '1', os.environ['GH_TOKEN'])
+          assert (temp / 'restored' / 'object.o').read_bytes() == random.Random(13).randbytes(250_000)
+          PY
+
+  save-mac:
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Create checkpoint volumes
+        run: |
+          PYTHONPATH=build/ci python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import random
+          import lite_checkpoint
+          temp = Path(os.environ['RUNNER_TEMP'])
+          work = temp / 'lite-workspace'
+          work.mkdir()
+          (work / 'object.o').write_bytes(random.Random(13).randbytes(250_000))
+          ident = lite_checkpoint.identity(os.environ['GITHUB_REPOSITORY'], os.environ['GITHUB_SHA'], work)
+          lite_checkpoint.save(work, temp / 'checkpoint', ident, 100_000)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brave-lite-s2-a${{ github.run_attempt }}-manifest
+          path: ${{ runner.temp }}/checkpoint/manifest.json
+          if-no-files-found: error
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brave-lite-s2-a${{ github.run_attempt }}-part-aa
+          path: ${{ runner.temp }}/checkpoint/part-aa
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brave-lite-s2-a${{ github.run_attempt }}-part-ab
+          path: ${{ runner.temp }}/checkpoint/part-ab
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brave-lite-s2-a${{ github.run_attempt }}-part-ac
+          path: ${{ runner.temp }}/checkpoint/part-ac
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+
+  restore-mac:
+    needs: save-mac
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: brave-lite-s2-a${{ github.run_attempt }}-manifest
+          path: ${{ runner.temp }}/manifest
+      - name: Stream checkpoint directly from GitHub
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 build/ci/lite_stream_checkpoint.py \
+            --workspace "$RUNNER_TEMP/lite-workspace" \
+            --manifest "$RUNNER_TEMP/manifest/manifest.json" \
+            --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA" \
+            --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --stage 2
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import random
+          output = Path(os.environ['RUNNER_TEMP']) / 'lite-workspace' / 'object.o'
+          assert output.read_bytes() == random.Random(13).randbytes(250_000)
+          PY
