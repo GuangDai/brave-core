@@ -71,6 +71,17 @@ class CacheRecoveryTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "identity"):
             recovery.verified_backends([self.artifacts], "GuangDai/brave-core")
 
+    def test_invalid_attempt_and_outcome_are_rejected(self):
+        with self.assertRaisesRegex(ValueError, "attempt"):
+            recovery.artifact_info("brave-lite-shard-1-part-1-a0")
+        path = self.artifact("brave-lite-shard-1-part-1-a1", "1", 1)
+        manifest_path = path / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["outcome"] = []
+        manifest_path.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(ValueError, "identity"):
+            recovery.verified_backends([self.artifacts], "GuangDai/brave-core")
+
     def test_symlinks_are_rejected(self):
         path = self.artifact("brave-lite-shard-1-part-1-a1", "1", 1)
         (path / "cache/aa/link").symlink_to("entry")

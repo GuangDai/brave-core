@@ -21,9 +21,13 @@ OUTCOMES = {"complete", "checkpoint", "failed"}
 def artifact_info(name):
     if match := STAGE.fullmatch(name):
         stage, shard, part, attempt = match.groups()
+        if int(attempt) < 1:
+            raise ValueError(f"Invalid cache attempt: {name}")
         return {"stage": int(stage), "shard": shard, "part": int(part), "attempt": int(attempt)}
     if match := SHARD.fullmatch(name):
         shard, part, attempt = match.groups()
+        if int(attempt) < 1:
+            raise ValueError(f"Invalid cache attempt: {name}")
         return {"stage": 0, "shard": shard, "part": int(part) if part else None,
                 "attempt": int(attempt)}
     return None
@@ -81,6 +85,7 @@ def verify_artifact(path, repository):
             or identity.get("repository") != repository or identity.get("architecture") != "arm64"
             or manifest.get("shard") != info["shard"]
             or manifest.get("target") != TARGETS[info["shard"]]
+            or not isinstance(manifest.get("outcome"), str)
             or manifest.get("outcome") not in OUTCOMES
             or (info["part"] is not None and (type(manifest.get("part")) is not int
                                                 or manifest.get("part") != info["part"]))
