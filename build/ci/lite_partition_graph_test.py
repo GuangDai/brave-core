@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Test that browser object partitions are exhaustive and disjoint."""
 
+from pathlib import Path
+import tempfile
 import unittest
 
 import lite_partition_graph
@@ -30,6 +32,18 @@ class PartitionTest(unittest.TestCase):
         objects = [f"obj/one/file{index}.o" for index in range(10)]
         for shards in lite_partition_graph.partition(objects).values():
             self.assertTrue(all(shard for shard in shards))
+
+    def test_command_measurement_accepts_non_utf8_bytes(self):
+        test_root = Path(__file__).resolve().parents[2] / ".git" / "lite-validation"
+        test_root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=test_root) as temporary:
+            root = Path(temporary)
+            ninja = root / "ninja"
+            ninja.write_text("#!/usr/bin/env python3\nimport sys\nsys.stdout.buffer.write(b'cc -c file\\xff.c\\n')\n")
+            ninja.chmod(0o755)
+            result = lite_partition_graph.measure(ninja, root, ["one", "two"])
+            self.assertEqual(result["compiler_commands"],
+                             {"unique": 1, "executions": 2, "repeated": 1})
 
 
 if __name__ == "__main__":

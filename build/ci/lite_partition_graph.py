@@ -13,7 +13,10 @@ import subprocess
 
 SHARDS = 5
 NODE = re.compile(r'^"0x[0-9a-fA-F]+" \[label="((?:\\.|[^"\\])*)"\]$')
-COMPILE = re.compile(r"(?:^|\s)-c(?:\s|$)")
+COMPILE = re.compile(rb"(?:^|\s)-c(?:\s|$)")
+CURRENT_TARGETS = ["v8:v8", "third_party/blink/renderer/core:core",
+                   "third_party/blink/renderer/modules:modules",
+                   "content/browser:browser", "chrome/browser:browser"]
 
 
 def graph_objects(lines):
@@ -79,25 +82,26 @@ def write_groups(build, groups):
     )
 
 
-def measure(ninja, build, algorithm):
+def measure(ninja, build, targets):
     commands = {}
     compiles = {}
     counts = []
-    for index in range(SHARDS):
+    for index, target in enumerate(targets):
         proc = subprocess.Popen(
             [str(ninja), "-C", str(build), "-f", "brave_lite_graph.ninja",
-             "-t", "commands", f"brave_lite_{algorithm}_{index + 1}"],
-            stdout=subprocess.PIPE, text=True,
+             "-t", "commands", target],
+            stdout=subprocess.PIPE,
         )
         count = 0
-        for line in proc.stdout:
-            key = hashlib.sha256(line.encode()).digest()[:16]
-            commands[key] = commands.get(key, 0) | (1 << index)
-            if COMPILE.search(line):
-                compiles[key] = compiles.get(key, 0) | (1 << index)
-            count += 1
+        with proc.stdout:
+            for line in proc.stdout:
+                key = hashlib.sha256(line).digest()[:16]
+                commands[key] = commands.get(key, 0) | (1 << index)
+                if COMPILE.search(line):
+                    compiles[key] = compiles.get(key, 0) | (1 << index)
+                count += 1
         if proc.wait() != 0:
-            raise RuntimeError(f"Could not inspect {algorithm} shard {index + 1}")
+            raise RuntimeError(f"Could not inspect target {target}")
         counts.append(count)
 
     def stats(items):
@@ -119,7 +123,8 @@ def main():
     ninja, build = args.ninja.resolve(), args.build.resolve()
     proc = subprocess.Popen([str(ninja), "-C", str(build), "-t", "graph", "brave"],
                             stdout=subprocess.PIPE, text=True)
-    objects = graph_objects(proc.stdout)
+    with proc.stdout:
+        objects = graph_objects(proc.stdout)
     if proc.wait() != 0:
         raise RuntimeError("Could not read the browser build graph")
     groups = partition(objects)
@@ -130,8 +135,9 @@ def main():
     for algorithm, shards in groups.items():
         report["algorithms"][algorithm] = {
             "objects_per_shard": [len(shard) for shard in shards],
-            **measure(ninja, build, algorithm),
+            **measure(ninja, build, [f"brave_lite_{algorithm}_{i}" for i in range(1, SHARDS + 1)]),
         }
+    report["current_targets"] = measure(ninja, build, CURRENT_TARGETS)
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2), flush=True)

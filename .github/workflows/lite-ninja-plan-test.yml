@@ -12,10 +12,12 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
   inspect:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: macos-26
     timeout-minutes: 150
     env:
@@ -61,6 +63,7 @@ jobs:
 
   analyze:
     needs: inspect
+    if: always() && (needs.inspect.result == 'success' || needs.inspect.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -72,6 +75,8 @@ jobs:
         with:
           name: lite-browser-ninja-graph
           path: ${{ runner.temp }}/lite-graph
+          github-token: ${{ github.token }}
+          run-id: ${{ needs.inspect.result == 'success' && github.run_id || '42004688079' }}
 
       - name: Install verified Ninja
         run: |
