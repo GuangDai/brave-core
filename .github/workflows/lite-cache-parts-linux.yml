@@ -1,0 +1,109 @@
+name: Incremental compiler cache artifact test
+
+on:
+  push:
+    branches: [ci/cache-checkpoints]
+    paths: [.github/workflows/lite-cache-parts-linux.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: src/brave
+          persist-credentials: false
+      - name: Install verified ccache
+        run: |
+          curl -fsSL https://github.com/ccache/ccache/releases/download/v4.14.2/ccache-4.14.2-linux-x86_64-musl-static.tar.gz -o "$RUNNER_TEMP/ccache.tar.gz"
+          echo 'd540ba01f160addbd3dd5e18eda9bd34005591b095c09ac8ae9d0a1b655e7ef5  '"$RUNNER_TEMP/ccache.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/ccache.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/ccache-4.14.2-linux-x86_64-musl-static" >> "$GITHUB_PATH"
+          echo "CCACHE_DIR=$RUNNER_TEMP/ccache-stats" >> "$GITHUB_ENV"
+          echo 'CCACHE_COMPILERCHECK=content' >> "$GITHUB_ENV"
+          echo 'CCACHE_REMOTE_ONLY=true' >> "$GITHUB_ENV"
+          echo "CCACHE_REMOTE_STORAGE=file:$RUNNER_TEMP/lite-cache" >> "$GITHUB_ENV"
+          echo "CCACHE_BASEDIR=$RUNNER_TEMP/producer" >> "$GITHUB_ENV"
+
+      - name: Compile and save the first part
+        run: |
+          mkdir -p "$CCACHE_BASEDIR/src" "$RUNNER_TEMP/lite-cache"
+          printf 'int first(void) { return 1; }\n' > "$CCACHE_BASEDIR/src/first.c"
+          (cd "$CCACHE_BASEDIR/src" && ccache gcc -c "$CCACHE_BASEDIR/src/first.c" -o first.o)
+          PYTHONPATH=src/brave/build/ci python3 - <<'PY'
+          from pathlib import Path
+          import os
+          import lite_cache_parts
+          root = Path(os.environ['RUNNER_TEMP'])
+          identity = {'repository': os.environ['GITHUB_REPOSITORY'], 'architecture': 'x86_64'}
+          lite_cache_parts.save(root / 'lite-cache', root / 'part1', root / 'state.json',
+                                identity, '1', 1, 'checkpoint', 'cache')
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brave-lite-shard-1-part-1-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/part1/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Compile and save the second part
+        run: |
+          printf 'int second(void) { return 2; }\n' > "$CCACHE_BASEDIR/src/second.c"
+          (cd "$CCACHE_BASEDIR/src" && ccache gcc -c "$CCACHE_BASEDIR/src/second.c" -o second.o)
+          PYTHONPATH=src/brave/build/ci python3 - <<'PY'
+          from pathlib import Path
+          import os
+          import lite_cache_parts
+          root = Path(os.environ['RUNNER_TEMP'])
+          identity = {'repository': os.environ['GITHUB_REPOSITORY'], 'architecture': 'x86_64'}
+          lite_cache_parts.save(root / 'lite-cache', root / 'part2', root / 'state.json',
+                                identity, '1', 2, 'checkpoint', 'time')
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brave-lite-shard-1-part-2-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/part2/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: brave-lite-shard-1-part-*-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/parts
+
+      - name: Verify transferred parts for another workspace
+        run: |
+          PYTHONPATH=src/brave/build/ci python3 - <<'PY'
+          from pathlib import Path
+          import os
+          import lite_cache_parts
+          root = Path(os.environ['RUNNER_TEMP'])
+          identity = {'repository': os.environ['GITHUB_REPOSITORY'], 'architecture': 'x86_64'}
+          storage = lite_cache_parts.verify(root / 'parts', identity, '1', os.environ['GITHUB_RUN_ATTEMPT'])
+          if storage.count('|read-only') != 2:
+              raise RuntimeError('Both parts must be available')
+          with open(os.environ['GITHUB_ENV'], 'a') as f:
+              f.write(f'CCACHE_REMOTE_STORAGE={storage}\nCCACHE_BASEDIR={root}/consumer\n')
+          PY
+
+      - name: Reuse both cached objects
+        run: |
+          mkdir -p "$CCACHE_BASEDIR/src"
+          printf 'int first(void) { return 1; }\n' > "$CCACHE_BASEDIR/src/first.c"
+          printf 'int second(void) { return 2; }\n' > "$CCACHE_BASEDIR/src/second.c"
+          cd "$CCACHE_BASEDIR/src"
+          ccache gcc -c "$CCACHE_BASEDIR/src/first.c" -o first.o
+          ccache gcc -c "$CCACHE_BASEDIR/src/second.c" -o second.o
+          nm first.o | grep first
+          nm second.o | grep second
+          ccache --show-stats -v
+          ccache --print-stats | awk '$1 == "remote_storage_hit" && $2 == 2 { ok=1 } END { exit !ok }'
