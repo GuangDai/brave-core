@@ -80,11 +80,12 @@ jobs:
           persist-credentials: false
 
       - name: Check out checkpoint tools
-        if: inputs.restore_stage != '0'
         uses: actions/checkout@v4
         with:
           path: .lite-tools
-          sparse-checkout: build/ci
+          sparse-checkout: |
+            build/ci
+            .github/actions/lite-stage-cache-phase
           fetch-depth: 1
           persist-credentials: false
 
@@ -302,10 +303,24 @@ jobs:
         if: steps.rescue.outputs.kind == 'stage'
         uses: actions/download-artifact@v4
         with:
-          name: brave-lite-stage-${{ steps.rescue.outputs.stage }}-shard-${{ steps.rescue.outputs.shard }}-part-1-a${{ steps.rescue.outputs.attempt }}
-          path: ${{ runner.temp }}/lite-rescue/brave-lite-shard-${{ steps.rescue.outputs.shard }}-part-1-a${{ steps.rescue.outputs.attempt }}
+          pattern: brave-lite-stage-${{ steps.rescue.outputs.stage }}-shard-${{ steps.rescue.outputs.shard }}-part-*-a${{ steps.rescue.outputs.attempt }}
+          path: ${{ runner.temp }}/lite-rescue-stage
           github-token: ${{ github.token }}
           run-id: ${{ steps.rescue.outputs.run }}
+
+      - name: Arrange the downloaded stage cache parts
+        if: steps.rescue.outputs.kind == 'stage'
+        env:
+          RESCUE_STAGE: ${{ steps.rescue.outputs.stage }}
+          RESCUE_SHARD: ${{ steps.rescue.outputs.shard }}
+          RESCUE_ATTEMPT: ${{ steps.rescue.outputs.attempt }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/lite-rescue"
+          for part in 1 2 3 4; do
+            from="$RUNNER_TEMP/lite-rescue-stage/brave-lite-stage-$RESCUE_STAGE-shard-$RESCUE_SHARD-part-$part-a$RESCUE_ATTEMPT"
+            to="$RUNNER_TEMP/lite-rescue/brave-lite-shard-$RESCUE_SHARD-part-$part-a$RESCUE_ATTEMPT"
+            if [[ -d "$from" ]]; then mv "$from" "$to"; fi
+          done
 
       - name: Download the additional shard cache
         if: steps.rescue.outputs.kind == 'shard'
@@ -334,6 +349,8 @@ jobs:
           current = identity(env['GITHUB_REPOSITORY'], env['LITE_SOURCE_COMMIT'], Path(env['GITHUB_WORKSPACE']))
           backends = verify(Path(env['RUNNER_TEMP']) / 'lite-rescue', current,
                             env['RESCUE_SHARD'], env['RESCUE_ATTEMPT'])
+          if not backends:
+              raise RuntimeError('No reusable entries in the selected extra cache')
           with open(env['GITHUB_ENV'], 'a', encoding='utf-8') as output:
               output.write('CCACHE_REMOTE_STORAGE=' + ' '.join(filter(None, [env.get('CCACHE_REMOTE_STORAGE', ''), backends])) + '\n')
           PY
@@ -351,81 +368,97 @@ jobs:
               output.write(f'CCACHE_REMOTE_STORAGE={backends}\nCCACHE_REMOTE_ONLY=true\n')
           PY
 
-      - name: Compile until the stage deadline
-        id: compile
-        working-directory: src/brave
-        shell: bash
-        env:
-          LITE_BUILD_TARGET: ${{ steps.selection.outputs.target }}
-        run: |
-          args=(pnpm run build Static --target_arch=arm64 --skip_signing)
-          if [[ -n "$LITE_BUILD_TARGET" ]]; then args+=(--target="$LITE_BUILD_TARGET"); fi
-          python3 build/ci/lite_timebox.py \
-            --workspace "$GITHUB_WORKSPACE" --started "$LITE_JOB_STARTED" \
-            --cache-dir "$RUNNER_TEMP/lite-stage-cache" --cache-limit-gib 8 \
-            -- "${args[@]}" \
-            --gn=symbol_level:0 --gn=cc_wrapper:ccache \
-            --gn=use_clang_modules:false --gn=enable_precompiled_headers:false \
-            --gn=enable_brave_wallet:false \
-            --gn=enable_brave_rewards:false \
-            --gn=enable_brave_vpn_v1:false \
-            --gn=enable_brave_vpn_v2:false \
-            --gn=enable_ai_chat:false
+      - name: Compile and preserve stage cache part 1
+        id: part1
+        uses: ./.lite-tools/.github/actions/lite-stage-cache-phase
+        with:
+          stage: ${{ inputs.stage }}
+          shard: ${{ steps.selection.outputs.shard }}
+          target: ${{ steps.selection.outputs.target }}
+          part: '1'
+          budget: '85'
+          cache_limit: '2'
 
-      - name: Report compiler cache usage
-        if: always() && steps.compile.outputs.outcome != ''
-        run: ccache --show-stats -v
+      - name: Compile and preserve stage cache part 2
+        id: part2
+        if: steps.part1.outputs.outcome == 'checkpoint' && (steps.part1.outputs.reason == 'time' || steps.part1.outputs.reason == 'cache')
+        uses: ./.lite-tools/.github/actions/lite-stage-cache-phase
+        with:
+          stage: ${{ inputs.stage }}
+          shard: ${{ steps.selection.outputs.shard }}
+          target: ${{ steps.selection.outputs.target }}
+          part: '2'
+          budget: '145'
+          cache_limit: '4'
+
+      - name: Compile and preserve stage cache part 3
+        id: part3
+        if: steps.part2.outputs.outcome == 'checkpoint' && (steps.part2.outputs.reason == 'time' || steps.part2.outputs.reason == 'cache')
+        uses: ./.lite-tools/.github/actions/lite-stage-cache-phase
+        with:
+          stage: ${{ inputs.stage }}
+          shard: ${{ steps.selection.outputs.shard }}
+          target: ${{ steps.selection.outputs.target }}
+          part: '3'
+          budget: '205'
+          cache_limit: '6'
+
+      - name: Compile and preserve stage cache part 4
+        id: part4
+        if: steps.part3.outputs.outcome == 'checkpoint' && (steps.part3.outputs.reason == 'time' || steps.part3.outputs.reason == 'cache')
+        uses: ./.lite-tools/.github/actions/lite-stage-cache-phase
+        with:
+          stage: ${{ inputs.stage }}
+          shard: ${{ steps.selection.outputs.shard }}
+          target: ${{ steps.selection.outputs.target }}
+          part: '4'
+          budget: '265'
+          cache_limit: '8'
 
       - name: Determine the next stage
         id: result
-        if: always() && steps.compile.outputs.outcome != ''
+        if: always() && steps.part1.outcome != '' && steps.part1.outcome != 'skipped'
         shell: bash
         env:
           LITE_BUILD_TARGET: ${{ steps.selection.outputs.target }}
-          OUTCOME: ${{ steps.compile.outputs.outcome }}
-          REASON: ${{ steps.compile.outputs.reason }}
+          OUTCOME_1: ${{ steps.part1.outputs.outcome }}
+          OUTCOME_2: ${{ steps.part2.outputs.outcome }}
+          OUTCOME_3: ${{ steps.part3.outputs.outcome }}
+          OUTCOME_4: ${{ steps.part4.outputs.outcome }}
+          REASON_1: ${{ steps.part1.outputs.reason }}
+          REASON_2: ${{ steps.part2.outputs.reason }}
+          REASON_3: ${{ steps.part3.outputs.reason }}
+          REASON_4: ${{ steps.part4.outputs.reason }}
+          STATUS_1: ${{ steps.part1.outcome }}
+          STATUS_2: ${{ steps.part2.outcome }}
+          STATUS_3: ${{ steps.part3.outcome }}
+          STATUS_4: ${{ steps.part4.outcome }}
         run: |
-          if [[ -n "$LITE_BUILD_TARGET" && "$OUTCOME" == complete ]]; then
+          outcome=''
+          reason=''
+          for number in 4 3 2 1; do
+            outcome_var="OUTCOME_$number"
+            reason_var="REASON_$number"
+            status_var="STATUS_$number"
+            if [[ -n "${!outcome_var}" ]]; then
+              outcome="${!outcome_var}"
+              reason="${!reason_var}"
+              break
+            fi
+            if [[ "${!status_var}" == failure ]]; then
+              outcome=failed
+              break
+            fi
+          done
+          [[ -n "$outcome" ]]
+          echo "compile_outcome=$outcome" >> "$GITHUB_OUTPUT"
+          if [[ -n "$LITE_BUILD_TARGET" && "$outcome" == complete ]]; then
             echo 'outcome=checkpoint' >> "$GITHUB_OUTPUT"
             echo 'reason=next' >> "$GITHUB_OUTPUT"
           else
-            echo "outcome=$OUTCOME" >> "$GITHUB_OUTPUT"
-            echo "reason=$REASON" >> "$GITHUB_OUTPUT"
+            echo "outcome=$outcome" >> "$GITHUB_OUTPUT"
+            echo "reason=$reason" >> "$GITHUB_OUTPUT"
           fi
-
-      - name: Record new compiler results
-        id: stage_cache
-        if: always() && steps.compile.outputs.outcome != ''
-        continue-on-error: true
-        working-directory: src/brave
-        env:
-          SHARD: ${{ steps.selection.outputs.shard }}
-          OUTCOME: ${{ steps.compile.outputs.outcome }}
-          REASON: ${{ steps.compile.outputs.reason }}
-        run: |
-          python3 build/ci/lite_cache_parts.py save \
-            --cache "$RUNNER_TEMP/lite-stage-cache" --stage "$RUNNER_TEMP/lite-stage-cache-artifact" \
-            --state "$RUNNER_TEMP/lite-stage-cache-state.json" \
-            --workspace "$GITHUB_WORKSPACE" --repository "$GITHUB_REPOSITORY" \
-            --commit "$LITE_SOURCE_COMMIT" --shard "$SHARD" --part 1 \
-            --outcome "$OUTCOME" --reason "$REASON"
-
-      - name: Upload new compiler results
-        id: upload_stage_cache
-        if: always() && steps.stage_cache.outcome == 'success'
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: brave-lite-stage-${{ inputs.stage }}-shard-${{ steps.selection.outputs.shard }}-part-1-a${{ github.run_attempt }}
-          path: ${{ runner.temp }}/lite-stage-cache-artifact/
-          if-no-files-found: error
-          include-hidden-files: true
-          compression-level: 0
-          retention-days: 90
-
-      - name: Report an unavailable stage cache
-        if: always() && steps.compile.outputs.outcome != '' && steps.upload_stage_cache.outcome != 'success'
-        run: echo '::warning::The additional compiler cache could not be saved; checkpointing will still be attempted.'
 
       - name: Verify the browser
         if: steps.result.outputs.outcome == 'complete'
@@ -468,7 +501,7 @@ jobs:
 
       - name: Save build checkpoint
         id: checkpoint
-        if: always() && (steps.result.outputs.outcome == 'checkpoint' || steps.result.outputs.outcome == 'complete' || steps.compile.outcome == 'failure')
+        if: always() && (steps.result.outputs.outcome == 'checkpoint' || steps.result.outputs.outcome == 'complete' || steps.result.outputs.compile_outcome == 'failed')
         continue-on-error: ${{ steps.result.outputs.outcome == 'complete' }}
         working-directory: src/brave
         run: |
@@ -487,7 +520,7 @@ jobs:
         continue-on-error: ${{ steps.result.outputs.outcome == 'complete' }}
         env:
           LITE_BUILD_PHASE: ${{ steps.selection.outputs.phase }}
-          LITE_PHASE_COMPLETE: ${{ steps.compile.outputs.outcome == 'complete' && 'true' || 'false' }}
+          LITE_PHASE_COMPLETE: ${{ steps.result.outputs.compile_outcome == 'complete' && 'true' || 'false' }}
         run: |
           phase_tool=src/brave/build/ci/lite_stage_phase.py
           if [[ -f .lite-tools/build/ci/lite_stage_phase.py ]]; then
@@ -708,3 +741,9 @@ jobs:
         run: |
           df -h "$GITHUB_WORKSPACE"
           du -sh "$GITHUB_WORKSPACE/src" "$GITHUB_WORKSPACE/src/out" 2>/dev/null || true
+
+      - name: Report a failed compilation
+        if: always() && steps.result.outputs.compile_outcome == 'failed'
+        run: |
+          echo '::error::Compilation failed; available cache parts and a checkpoint were saved when possible.'
+          exit 1

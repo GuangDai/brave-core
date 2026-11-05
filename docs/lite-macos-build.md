@@ -36,9 +36,11 @@ timestamps survive. Later stages reuse the already checked GN graph unless its
 arguments change or graph generation was interrupted. A shortage of disk space
 stops the workflow for inspection. Restore streams each volume from GitHub,
 checking its SHA-256 while extracting, so an extra complete local copy of the
-compressed checkpoint is not required. Each stage also uploads its newly
-compiled C/C++ cache entries separately, up to about 8 GiB, before attempting
-the full checkpoint. These entries survive a failed checkpoint upload.
+compressed checkpoint is not required. Each stage also uploads newly compiled
+C/C++ cache entries in up to four parts at about 2 GiB intervals or before
+successive time deadlines, up to about 8 GiB total. An upload failure causes
+the next part to retry the unsaved entries. Earlier uploaded parts survive an
+interrupted stage or failed full checkpoint.
 Artifacts are retained for up to 90 days. Actual build speed, artifact sizes and
 GitHub storage availability need to be measured on a full build.
 
@@ -87,9 +89,9 @@ The command prints the read-only `CCACHE_REMOTE_STORAGE` and
 SDK or paths can cause misses. Downloaded checkpoints and their source tree are
 also available as a separate fallback; the automated restore applies the
 stricter compatibility checks above.
-For a stage cache, put its downloaded directory under a separate root and
-rename it to `brave-lite-shard-SHARD-part-1-aATTEMPT` before using the same
-verification command with the shard and attempt from its artifact name.
+For a stage cache, put its downloaded parts under a separate root and rename
+each directory to `brave-lite-shard-SHARD-part-PART-aATTEMPT` before using the
+same verification command with the shard and attempt from its artifact names.
 
 For a complete checkpoint, download its manifest and every volume listed in the
 manifest into one directory. On an Apple Silicon Mac with the same macOS major

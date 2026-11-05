@@ -1,0 +1,109 @@
+name: Compile and preserve one stage cache part
+description: Save newly compiled results before continuing the same stage.
+
+inputs:
+  stage:
+    required: true
+    description: Stage number
+  shard:
+    required: true
+    description: Shard number used by this stage
+  target:
+    required: false
+    default: ''
+    description: Optional Ninja target
+  part:
+    required: true
+    description: Cache part number
+  budget:
+    required: true
+    description: Deadline in minutes from job start
+  cache_limit:
+    required: true
+    description: Total writable cache limit in GiB
+outputs:
+  outcome:
+    value: ${{ steps.compile.outputs.outcome || (steps.compile.outcome == 'failure' && 'failed') }}
+    description: Complete, checkpoint or failed
+  reason:
+    value: ${{ steps.compile.outputs.reason }}
+    description: Reason for a checkpoint
+
+runs:
+  using: composite
+  steps:
+    - name: Compile until the next cache checkpoint
+      id: compile
+      continue-on-error: true
+      shell: bash
+      working-directory: ${{ github.workspace }}/src/brave
+      env:
+        LITE_BUILD_TARGET: ${{ inputs.target }}
+        PART: ${{ inputs.part }}
+        BUDGET: ${{ inputs.budget }}
+        CACHE_LIMIT: ${{ inputs.cache_limit }}
+      run: |
+        if [[ "$PART" != 1 ]]; then export BRAVE_LITE_REUSE_GN=1; fi
+        args=(pnpm run build Static --target_arch=arm64 --skip_signing)
+        if [[ -n "$LITE_BUILD_TARGET" ]]; then args+=(--target="$LITE_BUILD_TARGET"); fi
+        python3 build/ci/lite_timebox.py \
+          --workspace "$GITHUB_WORKSPACE" --started "$LITE_JOB_STARTED" \
+          --budget-minutes "$BUDGET" --cache-dir "$RUNNER_TEMP/lite-stage-cache" \
+          --cache-limit-gib "$CACHE_LIMIT" -- "${args[@]}" \
+          --gn=symbol_level:0 --gn=cc_wrapper:ccache \
+          --gn=use_clang_modules:false --gn=enable_precompiled_headers:false \
+          --gn=enable_brave_wallet:false --gn=enable_brave_rewards:false \
+          --gn=enable_brave_vpn_v1:false --gn=enable_brave_vpn_v2:false \
+          --gn=enable_ai_chat:false
+
+    - name: Report compiler cache usage
+      if: always() && (steps.compile.outputs.outcome != '' || steps.compile.outcome == 'failure')
+      shell: bash
+      run: ccache --show-stats -v
+
+    - name: Record this cache part
+      id: manifest
+      if: always() && (steps.compile.outputs.outcome != '' || steps.compile.outcome == 'failure')
+      continue-on-error: true
+      shell: bash
+      working-directory: ${{ github.workspace }}/src/brave
+      env:
+        SHARD: ${{ inputs.shard }}
+        PART: ${{ inputs.part }}
+        OUTCOME: ${{ steps.compile.outputs.outcome || (steps.compile.outcome == 'failure' && 'failed') }}
+        REASON: ${{ steps.compile.outputs.reason }}
+      run: |
+        if [[ -f "$RUNNER_TEMP/lite-stage-cache-state.json" ]]; then
+          cp "$RUNNER_TEMP/lite-stage-cache-state.json" "$RUNNER_TEMP/lite-stage-cache-state-$PART.json"
+        fi
+        python3 build/ci/lite_cache_parts.py save \
+          --cache "$RUNNER_TEMP/lite-stage-cache" --stage "$RUNNER_TEMP/lite-stage-cache-part-$PART" \
+          --state "$RUNNER_TEMP/lite-stage-cache-state-$PART.json" \
+          --workspace "$GITHUB_WORKSPACE" --repository "$GITHUB_REPOSITORY" \
+          --commit "$LITE_SOURCE_COMMIT" --shard "$SHARD" --part "$PART" \
+          --outcome "$OUTCOME" --reason "$REASON"
+
+    - name: Upload this cache part
+      id: upload
+      if: always() && steps.manifest.outcome == 'success'
+      continue-on-error: true
+      uses: actions/upload-artifact@v4
+      with:
+        name: brave-lite-stage-${{ inputs.stage }}-shard-${{ inputs.shard }}-part-${{ inputs.part }}-a${{ github.run_attempt }}
+        path: ${{ runner.temp }}/lite-stage-cache-part-${{ inputs.part }}/
+        if-no-files-found: error
+        include-hidden-files: true
+        compression-level: 0
+        retention-days: 90
+
+    - name: Commit the uploaded cache state
+      if: always() && steps.upload.outcome == 'success'
+      shell: bash
+      env:
+        PART: ${{ inputs.part }}
+      run: mv "$RUNNER_TEMP/lite-stage-cache-state-$PART.json" "$RUNNER_TEMP/lite-stage-cache-state.json"
+
+    - name: Report an unavailable cache part
+      if: always() && (steps.compile.outputs.outcome != '' || steps.compile.outcome == 'failure') && steps.upload.outcome != 'success'
+      shell: bash
+      run: echo '::warning::This cache part could not be uploaded; the next part will retry its entries.'

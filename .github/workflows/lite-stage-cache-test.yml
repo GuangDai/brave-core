@@ -1,0 +1,115 @@
+name: Test periodic stage cache preservation
+
+on:
+  push:
+    branches: [ci/periodic-stage-cache]
+    paths:
+      - .github/workflows/lite-stage-cache-test.yml
+      - .github/actions/lite-stage-cache-phase/action.yml
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-26
+    timeout-minutes: 15
+    env:
+      LITE_SOURCE_COMMIT: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: src/brave
+          persist-credentials: false
+      - name: Set up a verified ccache and simulated build
+        run: |
+          curl -fsSL https://github.com/ccache/ccache/releases/download/v4.14.2/ccache-4.14.2-darwin.tar.gz -o "$RUNNER_TEMP/ccache.tar.gz"
+          echo 'cf240009630b605b775c7c5c7b7105a3b196c79f31af322c1557969aa28003fc  '"$RUNNER_TEMP/ccache.tar.gz" | shasum -a 256 -c -
+          tar -xzf "$RUNNER_TEMP/ccache.tar.gz" -C "$RUNNER_TEMP"
+          mkdir -p "$RUNNER_TEMP/fake-bin" "$RUNNER_TEMP/lite-stage-cache"
+          cat > "$RUNNER_TEMP/fake-bin/pnpm" <<'SH'
+          #!/bin/bash
+          mkdir -p "$RUNNER_TEMP/lite-stage-cache/aa"
+          echo "entry-$PART" > "$RUNNER_TEMP/lite-stage-cache/aa/entry-$PART"
+          if [[ "$PART" == 1 ]]; then sleep 20; fi
+          if [[ "$PART" == 4 ]]; then exit 2; fi
+          SH
+          chmod +x "$RUNNER_TEMP/fake-bin/pnpm"
+          echo "$RUNNER_TEMP/ccache-4.14.2-darwin" >> "$GITHUB_PATH"
+          echo "$RUNNER_TEMP/fake-bin" >> "$GITHUB_PATH"
+          echo "CCACHE_DIR=$RUNNER_TEMP/ccache-stats" >> "$GITHUB_ENV"
+          echo "LITE_JOB_STARTED=$(($(date +%s) - 50))" >> "$GITHUB_ENV"
+      - name: Save the first timed part
+        id: first
+        uses: ./src/brave/.github/actions/lite-stage-cache-phase
+        with:
+          stage: '1'
+          shard: '1'
+          part: '1'
+          budget: '1'
+          cache_limit: '2'
+      - name: Simulate an upload failure
+        id: second
+        uses: ./src/brave/.github/actions/lite-stage-cache-phase
+        with:
+          stage: bad/name
+          shard: '1'
+          part: '2'
+          budget: '2'
+          cache_limit: '4'
+      - name: Save entries from the failed upload with the next part
+        id: third
+        uses: ./src/brave/.github/actions/lite-stage-cache-phase
+        with:
+          stage: '1'
+          shard: '1'
+          part: '3'
+          budget: '3'
+          cache_limit: '6'
+      - name: Save results after a simulated compiler failure
+        id: fourth
+        uses: ./src/brave/.github/actions/lite-stage-cache-phase
+        with:
+          stage: '1'
+          shard: '1'
+          part: '4'
+          budget: '4'
+          cache_limit: '8'
+      - name: Check build outcomes
+        env:
+          FIRST: ${{ steps.first.outputs.outcome }}
+          SECOND: ${{ steps.second.outputs.outcome }}
+          THIRD: ${{ steps.third.outputs.outcome }}
+          FOURTH: ${{ steps.fourth.outputs.outcome }}
+        run: |
+          [[ "$FIRST" == checkpoint && "$SECOND" == complete && "$THIRD" == complete && "$FOURTH" == failed ]]
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: brave-lite-stage-1-shard-1-part-*-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/downloaded
+      - name: Verify the independently recoverable parts
+        working-directory: src/brave
+        run: |
+          mkdir -p "$RUNNER_TEMP/verified"
+          for part in 1 3 4; do
+            mv "$RUNNER_TEMP/downloaded/brave-lite-stage-1-shard-1-part-$part-a$GITHUB_RUN_ATTEMPT" \
+              "$RUNNER_TEMP/verified/brave-lite-shard-1-part-$part-a$GITHUB_RUN_ATTEMPT"
+          done
+          GITHUB_ENV="$RUNNER_TEMP/test-cache-env" python3 build/ci/lite_cache_parts.py verify \
+            --root "$RUNNER_TEMP/verified" --workspace "$GITHUB_WORKSPACE" \
+            --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA" --shard 1 --attempt "$GITHUB_RUN_ATTEMPT"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP']) / 'verified'
+          attempt = os.environ['GITHUB_RUN_ATTEMPT']
+          def names(part):
+              path = root / f'brave-lite-shard-1-part-{part}-a{attempt}' / 'manifest.json'
+              return {item['name'] for item in json.loads(path.read_text())['files']}
+          assert names(1) == {'aa/entry-1'}
+          assert names(3) == {'aa/entry-2', 'aa/entry-3'}
+          assert names(4) == {'aa/entry-4'}
+          PY
