@@ -6,6 +6,8 @@ on:
     paths:
       - .github/workflows/lite-shared-handoff-test.yml
       - build/ci/lite_shared_fixture.py
+      - build/ci/lite_checkpoint.py
+      - build/ci/lite_checkpoint_test.py
       - build/ci/lite_stage_phase.py
       - build/ci/lite_stage_phase_test.py
   workflow_dispatch:
@@ -37,6 +39,7 @@ jobs:
       - name: Build the shared prerequisite and save the workspace
         run: |
           python3 build/ci/lite_stage_phase_test.py -v
+          python3 build/ci/lite_checkpoint_test.py -v
           python3 build/ci/lite_shared_plan.py --ninja "$GITHUB_WORKSPACE/fixture/tools/ninja" \
             --build "$GITHUB_WORKSPACE/fixture/out/Static" --report "$GITHUB_WORKSPACE/fixture/plan.json"
           (cd fixture && tools/siso/siso ninja -C out/Static brave_lite_shared -k 1 \

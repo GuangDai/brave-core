@@ -29,6 +29,8 @@ class CheckpointTest(unittest.TestCase):
 
     def test_round_trip_preserves_files_permissions_and_symlinks(self):
         (self.work / "object.o").write_bytes(os.urandom(250_000))
+        original_mtime_ns = 1_700_000_000_987_654_321
+        os.utime(self.work / "object.o", ns=(original_mtime_ns, original_mtime_ns))
         binary = self.work / "executable"
         binary.write_text("#!/bin/sh\nexit 0\n")
         binary.chmod(0o755)
@@ -43,6 +45,7 @@ class CheckpointTest(unittest.TestCase):
 
         self.assertEqual((self.work / "object.o").read_bytes(),
                          (self.restored / "object.o").read_bytes())
+        self.assertEqual((self.restored / "object.o").stat().st_mtime_ns, original_mtime_ns)
         self.assertEqual((self.restored / "executable").stat().st_mode & 0o777,
                          0o755)
         self.assertEqual(os.readlink(self.restored / "alias"), "executable")
