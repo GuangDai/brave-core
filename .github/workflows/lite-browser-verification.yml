@@ -28,7 +28,7 @@ on:
         options: [brave-lite, brave-lite-verify]
         default: brave-lite
       translation_overlay:
-        description: Apply the pinned translation and password-test overlay to source 794c9cb
+        description: Apply the pinned translation and password-test overlay to source 27eb269
         type: boolean
         default: false
       rescue_cache:
