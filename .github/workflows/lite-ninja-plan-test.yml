@@ -1,0 +1,70 @@
+name: Inspect macOS browser build graph
+
+on:
+  push:
+    branches: [ci/ninja-partition]
+    paths:
+      - .github/workflows/lite-ninja-plan-test.yml
+      - build/ci/lite_generate_graph.js
+      - build/ci/lite_partition_graph.py
+      - build/ci/lite_partition_graph_test.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: macos-26
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: src/brave
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.16.0
+
+      - name: Set up pnpm
+        run: npm install --global pnpm@11.11.0
+
+      - name: Install build dependencies
+        working-directory: src/brave
+        run: pnpm install --frozen-lockfile --yes
+
+      - name: Initialize Chromium
+        working-directory: src/brave
+        run: pnpm run init --no-history --target_arch=arm64
+
+      - name: Install verified Ninja
+        run: |
+          curl -fsSL https://github.com/ninja-build/ninja/releases/download/v1.13.2/ninja-mac.zip -o "$RUNNER_TEMP/ninja.zip"
+          echo 'c99048673aa765960a99cf10c6ddb9f1fad506099ff0a0e137ad8960a88f321b  '"$RUNNER_TEMP/ninja.zip" | shasum -a 256 -c -
+          mkdir -p "$RUNNER_TEMP/lite-ninja"
+          unzip -q "$RUNNER_TEMP/ninja.zip" -d "$RUNNER_TEMP/lite-ninja"
+
+      - name: Test the partitioner
+        working-directory: src/brave
+        run: python3 build/ci/lite_partition_graph_test.py -v
+
+      - name: Generate the browser graph without compiling
+        working-directory: src/brave
+        run: node build/ci/lite_generate_graph.js
+
+      - name: Compare partitions without compiling
+        working-directory: src/brave
+        run: |
+          python3 build/ci/lite_partition_graph.py \
+            --ninja "$RUNNER_TEMP/lite-ninja/ninja" \
+            --build "$GITHUB_WORKSPACE/src/out/Static_arm64" \
+            --report "$RUNNER_TEMP/lite-graph-report/metrics.json"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lite-browser-build-graph-metrics
+          path: ${{ runner.temp }}/lite-graph-report/
+          if-no-files-found: warn
+          retention-days: 90
