@@ -1,0 +1,143 @@
+name: Test optional compiler-cache recovery
+
+on:
+  push:
+    branches: [ci/optional-rescue]
+    paths:
+      - .github/actions/lite-rescue-cache/**
+      - .github/workflows/lite-rescue-cache-test.yml
+      - build/ci/lite_rescue_preflight.py
+      - build/ci/lite_rescue_preflight_test.py
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  seed:
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: src/brave
+          persist-credentials: false
+      - name: Create valid and corrupted cache artifacts
+        run: |
+          python3 src/brave/build/ci/lite_rescue_preflight_test.py -v
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import sys
+          root = Path(os.environ['GITHUB_WORKSPACE'])
+          sys.path.insert(0, str(root / 'src/brave/build/ci'))
+          from lite_cache_parts import save
+          from lite_checkpoint import identity
+          tmp = Path(os.environ['RUNNER_TEMP'])
+          build_id = identity(os.environ['GITHUB_REPOSITORY'], os.environ['GITHUB_SHA'], root)
+          for label, shard, part in [('valid', '1', 1), ('good', '2', 2), ('bad', '2', 1)]:
+              cache = tmp / f'cache-{label}'
+              (cache / 'aa').mkdir(parents=True)
+              (cache / 'aa/entry').write_text(f'valid-{label}')
+              dest = tmp / label
+              save(cache, dest, tmp / f'state-{label}.json', build_id, shard, part, 'checkpoint', 'time')
+              if label == 'bad':
+                  (dest / 'cache/aa/entry').write_text('corrupted')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brave-lite-shard-1-part-1-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/valid/
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brave-lite-stage-1-shard-1-part-1-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/valid/
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brave-lite-shard-2-part-2-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/good/
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brave-lite-shard-2-part-1-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/bad/
+          retention-days: 1
+
+  verify:
+    needs: seed
+    runs-on: macos-26
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - name: valid-shard
+            selection: '{0}:1:{1}'
+            expected: 'true'
+            outcome: success
+          - name: valid-stage
+            selection: '{0}:1:1:{1}'
+            expected: 'true'
+            outcome: success
+          - name: corrupt-shard
+            selection: '{0}:2:{1}'
+            expected: 'false'
+            outcome: success
+          - name: missing
+            selection: '{0}:3:{1}'
+            expected: 'false'
+            outcome: success
+          - name: unavailable-run
+            selection: '1:1:1'
+            expected: 'false'
+            outcome: success
+          - name: invalid
+            selection: 'bad'
+            expected: 'false'
+            outcome: failure
+    env:
+      LITE_SOURCE_COMMIT: 0ac016891784896ca1517df800a8364b5e964162
+      CCACHE_REMOTE_STORAGE: file:///fixture-primary|read-only
+    steps:
+      - name: Check out pinned original source scripts
+        uses: actions/checkout@v4
+        with:
+          ref: 0ac016891784896ca1517df800a8364b5e964162
+          path: src/brave
+          sparse-checkout: build/ci
+          persist-credentials: false
+      - name: Check out current sparse action tools
+        uses: actions/checkout@v4
+        with:
+          path: .lite-tools
+          sparse-checkout: |
+            build/ci
+            .github/actions/lite-rescue-cache
+          persist-credentials: false
+      - name: Start the stage clock
+        run: echo "LITE_JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+      - name: Test cache recovery
+        id: rescue
+        continue-on-error: true
+        uses: ./.lite-tools/.github/actions/lite-rescue-cache
+        with:
+          selection: ${{ format(matrix.selection, github.run_id, github.run_attempt) }}
+      - name: Assert outcome and enabled backends
+        shell: bash
+        env:
+          EXPECTED: ${{ matrix.expected }}
+          EXPECTED_OUTCOME: ${{ matrix.outcome }}
+          ACTUAL: ${{ steps.rescue.outputs.reused }}
+          ACTUAL_OUTCOME: ${{ steps.rescue.outcome }}
+        run: |
+          [[ "$ACTUAL_OUTCOME" == "$EXPECTED_OUTCOME" ]]
+          [[ "$CCACHE_REMOTE_STORAGE" == file:///fixture-primary\|read-only* ]]
+          if [[ "$EXPECTED" == true ]]; then
+            [[ "$ACTUAL" == true && "$CCACHE_REMOTE_STORAGE" == *lite-rescue* ]]
+          else
+            [[ "$ACTUAL" != true && "$CCACHE_REMOTE_STORAGE" == 'file:///fixture-primary|read-only' ]]
+          fi

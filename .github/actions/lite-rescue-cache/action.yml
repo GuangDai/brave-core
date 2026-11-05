@@ -1,0 +1,122 @@
+name: Reuse an optional saved compiler cache
+description: Verify every available cache part before enabling it.
+
+inputs:
+  selection:
+    required: true
+    description: RUN:SHARD:ATTEMPT or RUN:STAGE:SHARD:ATTEMPT
+
+outputs:
+  reused:
+    description: Whether verified cache entries were enabled
+    value: ${{ steps.verify.outcome == 'success' && 'true' || 'false' }}
+
+runs:
+  using: composite
+  steps:
+    - name: Validate additional cache selection
+      id: selection
+      shell: bash
+      env:
+        RESCUE_CACHE: ${{ inputs.selection }}
+      run: |
+        if [[ "$RESCUE_CACHE" =~ ^([0-9]+):([1-8]):([1-5]):([0-9]+)$ ]]; then
+          echo 'kind=stage' >> "$GITHUB_OUTPUT"
+          echo "run=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          echo "stage=${BASH_REMATCH[2]}" >> "$GITHUB_OUTPUT"
+          echo "shard=${BASH_REMATCH[3]}" >> "$GITHUB_OUTPUT"
+          echo "attempt=${BASH_REMATCH[4]}" >> "$GITHUB_OUTPUT"
+        elif [[ "$RESCUE_CACHE" =~ ^([0-9]+):([1-5]):([0-9]+)$ ]]; then
+          echo 'kind=shard' >> "$GITHUB_OUTPUT"
+          echo "run=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          echo "shard=${BASH_REMATCH[2]}" >> "$GITHUB_OUTPUT"
+          echo "attempt=${BASH_REMATCH[3]}" >> "$GITHUB_OUTPUT"
+        else
+          echo '::error::Invalid additional cache selection.'
+          exit 1
+        fi
+
+    - name: Check additional cache disk and time budget
+      id: preflight
+      continue-on-error: true
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        RESCUE_RUN: ${{ steps.selection.outputs.run }}
+        RESCUE_KIND: ${{ steps.selection.outputs.kind }}
+        RESCUE_STAGE: ${{ steps.selection.outputs.stage }}
+        RESCUE_SHARD: ${{ steps.selection.outputs.shard }}
+        RESCUE_ATTEMPT: ${{ steps.selection.outputs.attempt }}
+      run: python3 "$GITHUB_WORKSPACE/.lite-tools/build/ci/lite_rescue_preflight.py"
+
+    - name: Download additional stage cache
+      id: stage_download
+      if: steps.preflight.outputs.ready == 'true' && steps.selection.outputs.kind == 'stage'
+      continue-on-error: true
+      uses: actions/download-artifact@v4
+      with:
+        pattern: brave-lite-stage-${{ steps.selection.outputs.stage }}-shard-${{ steps.selection.outputs.shard }}-part-*-a${{ steps.selection.outputs.attempt }}
+        path: ${{ runner.temp }}/lite-rescue-stage
+        github-token: ${{ github.token }}
+        run-id: ${{ steps.selection.outputs.run }}
+
+    - name: Arrange additional stage cache parts
+      id: arrange
+      if: steps.preflight.outputs.ready == 'true' && steps.selection.outputs.kind == 'stage' && steps.stage_download.outcome == 'success'
+      continue-on-error: true
+      shell: bash
+      env:
+        RESCUE_STAGE: ${{ steps.selection.outputs.stage }}
+        RESCUE_SHARD: ${{ steps.selection.outputs.shard }}
+        RESCUE_ATTEMPT: ${{ steps.selection.outputs.attempt }}
+      run: |
+        set -euo pipefail
+        mkdir -p "$RUNNER_TEMP/lite-rescue"
+        for part in 1 2 3 4; do
+          from="$RUNNER_TEMP/lite-rescue-stage/brave-lite-stage-$RESCUE_STAGE-shard-$RESCUE_SHARD-part-$part-a$RESCUE_ATTEMPT"
+          to="$RUNNER_TEMP/lite-rescue/brave-lite-shard-$RESCUE_SHARD-part-$part-a$RESCUE_ATTEMPT"
+          if [[ -d "$from" ]]; then mv "$from" "$to"; fi
+        done
+
+    - name: Download additional shard cache
+      id: shard_download
+      if: steps.preflight.outputs.ready == 'true' && steps.selection.outputs.kind == 'shard'
+      continue-on-error: true
+      uses: actions/download-artifact@v4
+      with:
+        pattern: brave-lite-shard-${{ steps.selection.outputs.shard }}-part-*-a${{ steps.selection.outputs.attempt }}
+        path: ${{ runner.temp }}/lite-rescue
+        github-token: ${{ github.token }}
+        run-id: ${{ steps.selection.outputs.run }}
+
+    - name: Verify all available additional cache parts
+      id: verify
+      if: steps.preflight.outputs.ready == 'true' && ((steps.selection.outputs.kind == 'stage' && steps.stage_download.outcome == 'success' && steps.arrange.outcome == 'success') || (steps.selection.outputs.kind == 'shard' && steps.shard_download.outcome == 'success'))
+      continue-on-error: true
+      shell: bash
+      working-directory: ${{ github.workspace }}/src/brave
+      env:
+        RESCUE_SHARD: ${{ steps.selection.outputs.shard }}
+        RESCUE_ATTEMPT: ${{ steps.selection.outputs.attempt }}
+      run: |
+        python3 - <<'PY'
+        import os
+        from pathlib import Path
+        import sys
+        sys.path.insert(0, 'build/ci')
+        from lite_cache_parts import verify
+        from lite_checkpoint import identity
+        env = os.environ
+        current = identity(env['GITHUB_REPOSITORY'], env['LITE_SOURCE_COMMIT'], Path(env['GITHUB_WORKSPACE']))
+        backends = verify(Path(env['RUNNER_TEMP']) / 'lite-rescue', current,
+                          env['RESCUE_SHARD'], env['RESCUE_ATTEMPT'])
+        if not backends:
+            raise RuntimeError('No reusable entries in the selected extra cache')
+        with open(env['GITHUB_ENV'], 'a', encoding='utf-8') as output:
+            output.write('CCACHE_REMOTE_STORAGE=' + ' '.join(filter(None, [env.get('CCACHE_REMOTE_STORAGE', ''), backends])) + '\n')
+        PY
+
+    - name: Report an unavailable optional cache
+      if: steps.selection.outcome == 'success' && steps.verify.outcome != 'success'
+      shell: bash
+      run: echo '::warning::The optional cache was not enabled; continuing with the verified checkpoint and other caches.'

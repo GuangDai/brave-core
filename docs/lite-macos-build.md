@@ -62,6 +62,12 @@ Use `RUN_ID:SHARD:ATTEMPT` for an earlier parallel shard, or
 contain these numbers. This also allows an earlier checkpoint to benefit from
 a later stage cache when the later checkpoint is unavailable. A cache contains
 eligible compiler results, so other build work may need to run again.
+An invalid cache selection fails the stage. A missing, unavailable or invalid
+cache is skipped after a warning; no entries are enabled unless every available
+part passes verification. To protect space for new results and a checkpoint,
+the optional cache is downloaded only when at least 32 GiB plus twice the
+artifact download size is free and at least 60 minutes remain in the build
+window.
 
 For a new build, supplying an earlier shard run ID skips the five shard jobs
 and attempts to reuse the available caches, including caches saved after a
