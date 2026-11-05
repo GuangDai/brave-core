@@ -1,0 +1,101 @@
+name: Output-only checkpoint experiment
+
+on:
+  push:
+    branches: [ci/output-checkpoints]
+    paths:
+      - .github/workflows/lite-thin-checkpoint-test.yml
+      - build/ci/lite_thin_checkpoint.py
+      - build/ci/lite_thin_checkpoint_test.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Test source and output restoration
+        run: python3 build/ci/lite_thin_checkpoint_test.py -v
+
+  save:
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Test source and output restoration
+        run: python3 build/ci/lite_thin_checkpoint_test.py -v
+      - name: Create a small output checkpoint
+        run: |
+          PYTHONPATH=build/ci python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import random
+          import lite_checkpoint
+          import lite_thin_checkpoint
+          temp = Path(os.environ['RUNNER_TEMP'])
+          work = temp / 'thin-fixture'
+          source = work / 'src' / 'brave'
+          source.mkdir(parents=True)
+          (source / 'large.dat').write_bytes(random.Random(7).randbytes(5_000_000))
+          (source / 'changed.cc').write_text('before')
+          stamp = 1_600_000_000_123_456_789
+          os.utime(source / 'large.dat', ns=(stamp, stamp))
+          baseline = temp / 'thin-baseline.json'
+          lite_thin_checkpoint.capture_baseline(work, baseline)
+          (source / 'changed.cc').write_text('after')
+          output = work / 'src' / 'out' / 'Static_arm64'
+          output.mkdir(parents=True)
+          (output / 'object.o').write_bytes(b'compiled-object')
+          ident = lite_checkpoint.identity(os.environ['GITHUB_REPOSITORY'], os.environ['GITHUB_SHA'], work)
+          lite_thin_checkpoint.save(work, baseline, temp / 'thin-save', temp / 'thin-checkpoint', ident)
+          size = sum(p.stat().st_size for p in (temp / 'thin-checkpoint').iterdir())
+          print(f'Checkpoint {size} bytes; unchanged source 5,000,000 bytes')
+          assert size < 50_000
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lite-thin-checkpoint-fixture
+          path: ${{ runner.temp }}/thin-checkpoint/
+          if-no-files-found: error
+          retention-days: 1
+
+  restore:
+    needs: save
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: lite-thin-checkpoint-fixture
+          path: ${{ runner.temp }}/thin-checkpoint
+      - name: Restore against a fresh source tree
+        run: |
+          PYTHONPATH=build/ci python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import random
+          import lite_checkpoint
+          import lite_thin_checkpoint
+          temp = Path(os.environ['RUNNER_TEMP'])
+          work = temp / 'thin-fixture'
+          source = work / 'src' / 'brave'
+          source.mkdir(parents=True)
+          (source / 'large.dat').write_bytes(random.Random(7).randbytes(5_000_000))
+          (source / 'changed.cc').write_text('before')
+          ident = lite_checkpoint.identity(os.environ['GITHUB_REPOSITORY'], os.environ['GITHUB_SHA'], work)
+          lite_thin_checkpoint.restore(work, temp / 'thin-checkpoint', temp / 'thin-restore', ident)
+          assert (source / 'changed.cc').read_text() == 'after'
+          assert (source / 'large.dat').stat().st_mtime_ns == 1_600_000_000_123_456_789
+          assert (work / 'src' / 'out' / 'Static_arm64' / 'object.o').read_bytes() == b'compiled-object'
+          PY
