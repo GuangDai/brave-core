@@ -1,0 +1,62 @@
+name: Reuse an optional browser-test compiler cache
+description: Verify saved test-cache parts before adding read-only backends.
+
+inputs:
+  run_id:
+    required: true
+    description: Previous browser-verification run ID
+  attempt:
+    required: true
+    description: Previous run attempt
+
+outputs:
+  reused:
+    description: Whether validated browser-test cache parts were enabled
+    value: ${{ steps.verify.outcome == 'success' && 'true' || 'false' }}
+
+runs:
+  using: composite
+  steps:
+    - name: Validate previous verification run
+      id: selection
+      shell: bash
+      env:
+        VERIFY_CACHE_RUN: ${{ inputs.run_id }}
+        VERIFY_CACHE_ATTEMPT: ${{ inputs.attempt }}
+      run: |
+        [[ "$VERIFY_CACHE_RUN" =~ ^[1-9][0-9]*$ && "$VERIFY_CACHE_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+        echo "run=$VERIFY_CACHE_RUN" >> "$GITHUB_OUTPUT"
+        echo "attempt=$VERIFY_CACHE_ATTEMPT" >> "$GITHUB_OUTPUT"
+    - name: Check cache disk and time budget
+      id: preflight
+      continue-on-error: true
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        VERIFY_CACHE_RUN: ${{ steps.selection.outputs.run }}
+        VERIFY_CACHE_ATTEMPT: ${{ steps.selection.outputs.attempt }}
+      run: python3 "$GITHUB_WORKSPACE/.lite-tools/build/ci/lite_browser_test_cache_restore.py" preflight
+    - name: Download prior verification cache parts
+      id: download
+      if: steps.preflight.outputs.ready == 'true'
+      continue-on-error: true
+      uses: actions/download-artifact@v4
+      with:
+        pattern: brave-lite-verify-stage-1-shard-5-part-*-a${{ steps.selection.outputs.attempt }}
+        path: ${{ runner.temp }}/lite-browser-verify-cache
+        github-token: ${{ github.token }}
+        run-id: ${{ steps.selection.outputs.run }}
+    - name: Validate all downloaded verification caches
+      id: verify
+      if: steps.preflight.outputs.ready == 'true' && steps.download.outcome == 'success'
+      continue-on-error: true
+      shell: bash
+      env:
+        VERIFY_CACHE_RUN: ${{ steps.selection.outputs.run }}
+        VERIFY_CACHE_ATTEMPT: ${{ steps.selection.outputs.attempt }}
+        EXPECTED_CACHE_NAMES: ${{ steps.preflight.outputs.names }}
+      run: python3 "$GITHUB_WORKSPACE/.lite-tools/build/ci/lite_browser_test_cache_restore.py" verify
+    - name: Report unavailable optional verification cache
+      if: steps.selection.outcome == 'success' && steps.verify.outcome != 'success'
+      shell: bash
+      run: echo '::warning::Prior verification cache was not enabled; continuing with the checkpoint and other caches.'
