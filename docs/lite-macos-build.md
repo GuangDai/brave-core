@@ -38,8 +38,8 @@ stops the workflow for inspection. Restore streams each volume from GitHub,
 checking its SHA-256 while extracting, so an extra complete local copy of the
 compressed checkpoint is not required. Each stage also uploads newly compiled
 C/C++ cache entries in up to four parts at about 2 GiB intervals or before
-successive time deadlines, up to about 8 GiB total. An upload failure causes
-the next part to retry the unsaved entries. Earlier uploaded parts survive an
+successive time deadlines, up to about 8 GiB total. A failed upload is retried
+once; if it still fails, the next part includes the unsaved entries. Earlier uploaded parts survive an
 interrupted stage or failed full checkpoint.
 Artifacts are retained for up to 90 days. Actual build speed, artifact sizes and
 GitHub storage availability need to be measured on a full build.

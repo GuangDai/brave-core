@@ -96,14 +96,27 @@ runs:
         compression-level: 0
         retention-days: 90
 
+    - name: Retry this cache part once
+      id: retry
+      if: always() && steps.manifest.outcome == 'success' && steps.upload.outcome == 'failure'
+      continue-on-error: true
+      uses: actions/upload-artifact@v4
+      with:
+        name: brave-lite-stage-${{ inputs.stage }}-shard-${{ inputs.shard }}-part-${{ inputs.part }}-a${{ github.run_attempt }}
+        path: ${{ runner.temp }}/lite-stage-cache-part-${{ inputs.part }}/
+        if-no-files-found: error
+        include-hidden-files: true
+        compression-level: 0
+        retention-days: 90
+
     - name: Commit the uploaded cache state
-      if: always() && steps.upload.outcome == 'success'
+      if: always() && (steps.upload.outcome == 'success' || steps.retry.outcome == 'success')
       shell: bash
       env:
         PART: ${{ inputs.part }}
       run: mv "$RUNNER_TEMP/lite-stage-cache-state-$PART.json" "$RUNNER_TEMP/lite-stage-cache-state.json"
 
     - name: Report an unavailable cache part
-      if: always() && (steps.compile.outputs.outcome != '' || steps.compile.outcome == 'failure') && steps.upload.outcome != 'success'
+      if: always() && (steps.compile.outputs.outcome != '' || steps.compile.outcome == 'failure') && steps.upload.outcome != 'success' && steps.retry.outcome != 'success'
       shell: bash
       run: echo '::warning::This cache part could not be uploaded; the next part will retry its entries.'
