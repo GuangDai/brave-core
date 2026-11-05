@@ -1,0 +1,23 @@
+name: Diagnose GitHub-hosted runner queue
+
+on:
+  push:
+    branches:
+      - ci/runner-queue-probe
+
+permissions: {}
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Show operating system and architecture
+        run: uname -srm
+
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 5
+    steps:
+      - name: Show operating system and architecture
+        run: uname -srm
