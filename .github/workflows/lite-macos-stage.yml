@@ -279,7 +279,7 @@ jobs:
           echo "found=$found" >> "$GITHUB_OUTPUT"
 
       - name: Validate shared group cache metadata
-        if: inputs.shared_mode == 'assembly'
+        if: inputs.shared_mode == 'assembly' && steps.parts.outputs.found == 'true'
         env:
           SHARD: ${{ steps.selection.outputs.shard }}
           ATTEMPT: ${{ inputs.shards_attempt }}
@@ -292,14 +292,16 @@ jobs:
           root = Path(env['RUNNER_TEMP']) / 'lite-shard-parts'
           pattern = f"brave-lite-shard-{env['SHARD']}-part-*-a{env['ATTEMPT']}/manifest.json"
           manifests = list(root.glob(pattern))
-          if not manifests:
-              raise RuntimeError('The selected shared group has no saved cache parts')
           for path in manifests:
               data = json.loads(path.read_text())
               if (data.get('actual_build_target') != f"brave_lite_group_{env['SHARD']}"
                       or data.get('ninja_file') != 'brave_lite_graph.ninja'):
                   raise RuntimeError(f'Incorrect group cache metadata: {path}')
           PY
+
+      - name: Continue without a missing shared group cache
+        if: inputs.shared_mode == 'assembly' && steps.parts.outputs.found != 'true'
+        run: echo '::warning::No cache from this group is available; its missing outputs will be compiled during assembly.'
 
       - name: Verify available cache parts
         if: steps.parts.outputs.found == 'true'

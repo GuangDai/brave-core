@@ -235,7 +235,7 @@ jobs:
 
   assemble:
     needs: [select_bootstrap, groups]
-    if: needs.select_bootstrap.result == 'success' && needs.groups.result == 'success'
+    if: always() && needs.select_bootstrap.result == 'success' && (needs.groups.result == 'success' || needs.groups.result == 'failure')
     runs-on: ubuntu-latest
     steps:
       - name: Start assembly using the five saved group caches
@@ -271,6 +271,15 @@ jobs:
           (Path(env['RUNNER_TEMP']) / 'assembly-dispatch.json').write_text(json.dumps(data, indent=2) + '\n')
           PY
       - uses: actions/upload-artifact@v4
+        id: upload_dispatch
+        continue-on-error: true
+        with:
+          name: brave-lite-assembly-dispatch-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/assembly-dispatch.json
+          if-no-files-found: error
+          retention-days: 90
+      - uses: actions/upload-artifact@v4
+        if: steps.upload_dispatch.outcome == 'failure'
         with:
           name: brave-lite-assembly-dispatch-a${{ github.run_attempt }}
           path: ${{ runner.temp }}/assembly-dispatch.json

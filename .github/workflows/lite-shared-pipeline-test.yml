@@ -106,9 +106,24 @@ jobs:
       start_phase: shared
       shared_mode: assembly
 
+  assembly_without_cache:
+    needs: [bootstrap, groups]
+    if: needs.bootstrap.result == 'success' && needs.groups.result == 'success'
+    uses: ./.github/workflows/lite-macos-stage.yml
+    with:
+      stage: 3
+      restore_stage: '1'
+      restore_run_id: ${{ format('{0}', github.run_id) }}
+      restore_attempt: ${{ needs.bootstrap.outputs.attempt }}
+      source_commit: ${{ github.sha }}
+      shards_run_id: ${{ format('{0}', github.run_id) }}
+      shards_attempt: '99'
+      start_phase: shared
+      shared_mode: assembly
+
   verify:
-    needs: assembly
-    if: needs.assembly.result == 'success' && needs.assembly.outputs.reason == 'next'
+    needs: [assembly, assembly_without_cache]
+    if: needs.assembly.result == 'success' && needs.assembly.outputs.reason == 'next' && needs.assembly_without_cache.result == 'success' && needs.assembly_without_cache.outputs.reason == 'next'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -122,6 +137,22 @@ jobs:
           import os
           from pathlib import Path
           manifest = json.loads((Path(os.environ['RUNNER_TEMP']) / 'manifest/manifest.json').read_text())
+          assert manifest['shared_complete'] is True
+          assert manifest['shared_assembly'] is True
+          assert manifest['build_phase'] == 1
+          assert manifest['phase_complete'] is True
+          PY
+      - uses: actions/download-artifact@v4
+        with:
+          name: brave-lite-s3-a${{ github.run_attempt }}-manifest
+          path: ${{ runner.temp }}/uncached-manifest
+      - name: Verify assembly also advanced without the group cache
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          manifest = json.loads((Path(os.environ['RUNNER_TEMP']) / 'uncached-manifest/manifest.json').read_text())
           assert manifest['shared_complete'] is True
           assert manifest['shared_assembly'] is True
           assert manifest['build_phase'] == 1
