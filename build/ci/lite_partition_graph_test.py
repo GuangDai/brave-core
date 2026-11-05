@@ -21,8 +21,15 @@ class PartitionTest(unittest.TestCase):
         lines = ['"0x1" [label="obj/one.o"]',
                  '"0x2" [label="cxx", shape=ellipse]',
                  '"0x3" [label="../../one.cc"]',
-                 '"0x1" [label="obj/one.o"]']
-        self.assertEqual(lite_partition_graph.graph_objects(lines), ["obj/one.o"])
+                 '"0x1" [label="obj/one.o"]',
+                 '"0x4" [label="obj/f16_arch=armv8.2-a+fp16/file.o"]']
+        self.assertEqual(lite_partition_graph.graph_objects(lines),
+                         ["obj/f16_arch=armv8.2-a+fp16/file.o", "obj/one.o"])
+
+    def test_small_single_directory_uses_all_runners(self):
+        objects = [f"obj/one/file{index}.o" for index in range(10)]
+        for shards in lite_partition_graph.partition(objects).values():
+            self.assertTrue(all(shard for shard in shards))
 
 
 if __name__ == "__main__":

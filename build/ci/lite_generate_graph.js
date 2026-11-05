@@ -11,6 +11,8 @@ config.update({
   gn: [
     'symbol_level:0',
     'cc_wrapper:ccache',
+    'use_clang_modules:false',
+    'enable_precompiled_headers:false',
     'enable_brave_wallet:false',
     'enable_brave_rewards:false',
     'enable_brave_vpn_v1:false',

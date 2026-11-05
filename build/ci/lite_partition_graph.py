@@ -12,22 +12,25 @@ import subprocess
 
 
 SHARDS = 5
-OBJECT_PATH = re.compile(r"obj/[A-Za-z0-9_+./@-]+\.o\Z")
 NODE = re.compile(r'^"0x[0-9a-fA-F]+" \[label="((?:\\.|[^"\\])*)"\]$')
 COMPILE = re.compile(r"(?:^|\s)-c(?:\s|$)")
 
 
 def graph_objects(lines):
     objects = set()
+    unsupported = set()
     for line in lines:
         match = NODE.match(line.strip())
         if not match:
             continue
         name = json.loads('"' + match.group(1) + '"')
         if name.startswith("obj/") and name.endswith(".o"):
-            if not OBJECT_PATH.fullmatch(name) or ".." in name.split("/"):
-                raise ValueError(f"Unsupported object name: {name!r}")
+            if (".." in name.split("/") or any(c in name for c in "\n\r\t\0|#\\")):
+                unsupported.add(name)
+                continue
             objects.add(name)
+    if unsupported:
+        raise ValueError(f"Unsupported object names: {sorted(unsupported)[:20]!r}")
     if not objects:
         raise RuntimeError("The browser graph contains no object files")
     return sorted(objects)
@@ -43,8 +46,9 @@ def partition(objects):
     dirs = defaultdict(list)
     for name in objects:
         dirs[name.rsplit("/", 1)[0]].append(name)
-    chunks = [names[i:i + 128] for names in dirs.values()
-              for i in range(0, len(names), 128)]
+    chunk_size = min(128, max(1, (len(objects) + SHARDS * 4 - 1) // (SHARDS * 4)))
+    chunks = [names[i:i + chunk_size] for names in dirs.values()
+              for i in range(0, len(names), chunk_size)]
     chunks.sort(key=lambda names: (-len(names), names[0]))
     grouped = [[] for _ in range(SHARDS)]
     available = [(0, index) for index in range(SHARDS)]
@@ -61,10 +65,14 @@ def write_groups(build, groups):
     for algorithm, shards in groups.items():
         for index, objects in enumerate(shards, 1):
             target = f"brave_lite_{algorithm}_{index}"
+            if not objects:
+                text.append(f"build {target}: phony\n")
+                continue
             text.append(f"build {target}: phony $\n")
             for position, name in enumerate(objects):
                 continuation = " $" if position + 1 < len(objects) else ""
-                text.append(f"  {name}{continuation}\n")
+                escaped = name.replace("$", "$$").replace(" ", "$ ").replace(":", "$:")
+                text.append(f"  {escaped}{continuation}\n")
     (build / "brave_lite_partitions.ninja").write_text("".join(text))
     (build / "brave_lite_graph.ninja").write_text(
         "include build.ninja\ninclude brave_lite_partitions.ninja\n"
