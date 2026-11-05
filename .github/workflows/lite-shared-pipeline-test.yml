@@ -82,7 +82,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        group: ['1', '5']
+        group: ['1', '2', '3', '4', '5']
     uses: ./.github/workflows/lite-shared-group.yml
     with:
       group: ${{ matrix.group }}
@@ -126,6 +126,24 @@ jobs:
     if: needs.assembly.result == 'success' && needs.assembly.outputs.reason == 'next' && needs.assembly_without_cache.result == 'success' && needs.assembly_without_cache.outputs.reason == 'next'
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: brave-lite-shard-*-part-*-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/group-caches
+      - name: Verify all five groups saved their own cache
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP']) / 'group-caches'
+          attempt = os.environ['GITHUB_RUN_ATTEMPT']
+          for group in range(1, 6):
+              manifest = json.loads((root / f'brave-lite-shard-{group}-part-1-a{attempt}' / 'manifest.json').read_text())
+              assert manifest['actual_build_target'] == f'brave_lite_group_{group}'
+              assert manifest['ninja_file'] == 'brave_lite_graph.ninja'
+              assert manifest['files']
+          PY
       - uses: actions/download-artifact@v4
         with:
           name: brave-lite-s2-a${{ github.run_attempt }}-manifest

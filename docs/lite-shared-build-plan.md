@@ -23,11 +23,12 @@ checkpoint restore passed in that fixture.
 The experimental `lite-shared-build.yml` workflow accepts an existing complete
 workspace checkpoint, builds and checkpoints the real shared target, then
 restores it on five compatible runners. Each runner saves its own group's
-compiler cache in parts. If all five groups finish and upload their caches, the
-workflow starts a separate staged assembly run that restores one cache at a
-time and builds the five groups before linking the browser. Group cache
-manifests include `actual_build_target` and `ninja_file` to distinguish them
-from ordinary shards.
+compiler cache in parts. Once the groups have finished or failed, the workflow
+starts a separate staged assembly run that restores one available cache at a
+time and builds the five groups before linking the browser. Missing group
+caches are compiled during assembly; uploaded cache parts remain reusable.
+Group cache manifests include `actual_build_target` and `ninja_file` to
+distinguish them from ordinary shards.
 
 The restore must preserve timestamps, build metadata, source revision,
 architecture, Xcode and SDK. The workflow remains experimental: a real
