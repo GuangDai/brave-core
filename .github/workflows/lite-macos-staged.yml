@@ -15,11 +15,20 @@ on:
         description: Attempt that uploaded the checkpoint
         type: string
         default: '1'
+      shards_run_id:
+        description: Original shard run ID, if different from the checkpoint run
+        type: string
+        default: ''
+      shards_attempt:
+        description: Original shard attempt, if different from the checkpoint attempt
+        type: string
+        default: ''
   push:
     branches: [lite/v1.98.63]
     paths:
       - .github/workflows/lite-macos-staged.yml
       - .github/workflows/lite-macos-stage.yml
+      - .github/workflows/lite-macos-shard.yml
       - build/ci/**
 
 permissions:
@@ -27,83 +36,122 @@ permissions:
   contents: read
 
 jobs:
+  shards:
+    if: inputs.resume_stage == '' || inputs.resume_stage == '0'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: '1'
+            target: v8:v8
+          - shard: '2'
+            target: third_party/blink/renderer/core:core
+          - shard: '3'
+            target: third_party/blink/renderer/modules:modules
+          - shard: '4'
+            target: content/browser:browser
+          - shard: '5'
+            target: chrome/browser:browser
+    uses: ./.github/workflows/lite-macos-shard.yml
+    with:
+      shard: ${{ matrix.shard }}
+      target: ${{ matrix.target }}
+
   stage1:
+    needs: shards
+    if: always() && (needs.shards.result == 'success' || (needs.shards.result == 'skipped' && inputs.resume_stage != '' && inputs.resume_stage != '0'))
     uses: ./.github/workflows/lite-macos-stage.yml
     with:
       stage: 1
       restore_stage: ${{ inputs.resume_stage || '0' }}
       restore_run_id: ${{ inputs.resume_run_id || format('{0}', github.run_id) }}
       restore_attempt: ${{ inputs.resume_attempt || '1' }}
+      shards_run_id: ${{ inputs.resume_stage != '' && inputs.resume_stage != '0' && (inputs.shards_run_id || inputs.resume_run_id) || format('{0}', github.run_id) }}
+      shards_attempt: ${{ inputs.resume_stage != '' && inputs.resume_stage != '0' && (inputs.shards_attempt || inputs.resume_attempt) || format('{0}', github.run_attempt) }}
 
   stage2:
     needs: stage1
-    if: needs.stage1.result == 'success' && needs.stage1.outputs.outcome == 'checkpoint' && needs.stage1.outputs.reason == 'time'
+    if: needs.stage1.result == 'success' && needs.stage1.outputs.outcome == 'checkpoint' && (needs.stage1.outputs.reason == 'time' || needs.stage1.outputs.reason == 'next')
     uses: ./.github/workflows/lite-macos-stage.yml
     with:
       stage: 2
       restore_stage: '1'
       restore_run_id: ${{ format('{0}', github.run_id) }}
       restore_attempt: ${{ needs.stage1.outputs.attempt }}
+      shards_run_id: ${{ inputs.resume_stage != '' && inputs.resume_stage != '0' && (inputs.shards_run_id || inputs.resume_run_id) || format('{0}', github.run_id) }}
+      shards_attempt: ${{ inputs.resume_stage != '' && inputs.resume_stage != '0' && (inputs.shards_attempt || inputs.resume_attempt) || format('{0}', github.run_attempt) }}
 
   stage3:
     needs: stage2
-    if: needs.stage2.result == 'success' && needs.stage2.outputs.outcome == 'checkpoint' && needs.stage2.outputs.reason == 'time'
+    if: needs.stage2.result == 'success' && needs.stage2.outputs.outcome == 'checkpoint' && (needs.stage2.outputs.reason == 'time' || needs.stage2.outputs.reason == 'next')
     uses: ./.github/workflows/lite-macos-stage.yml
     with:
       stage: 3
       restore_stage: '2'
       restore_run_id: ${{ format('{0}', github.run_id) }}
       restore_attempt: ${{ needs.stage2.outputs.attempt }}
+      shards_run_id: ${{ inputs.resume_stage != '' && inputs.resume_stage != '0' && (inputs.shards_run_id || inputs.resume_run_id) || format('{0}', github.run_id) }}
+      shards_attempt: ${{ inputs.resume_stage != '' && inputs.resume_stage != '0' && (inputs.shards_attempt || inputs.resume_attempt) || format('{0}', github.run_attempt) }}
 
   stage4:
     needs: stage3
-    if: needs.stage3.result == 'success' && needs.stage3.outputs.outcome == 'checkpoint' && needs.stage3.outputs.reason == 'time'
+    if: needs.stage3.result == 'success' && needs.stage3.outputs.outcome == 'checkpoint' && (needs.stage3.outputs.reason == 'time' || needs.stage3.outputs.reason == 'next')
     uses: ./.github/workflows/lite-macos-stage.yml
     with:
       stage: 4
       restore_stage: '3'
       restore_run_id: ${{ format('{0}', github.run_id) }}
       restore_attempt: ${{ needs.stage3.outputs.attempt }}
+      shards_run_id: ${{ inputs.resume_stage != '' && inputs.resume_stage != '0' && (inputs.shards_run_id || inputs.resume_run_id) || format('{0}', github.run_id) }}
+      shards_attempt: ${{ inputs.resume_stage != '' && inputs.resume_stage != '0' && (inputs.shards_attempt || inputs.resume_attempt) || format('{0}', github.run_attempt) }}
 
   stage5:
     needs: stage4
-    if: needs.stage4.result == 'success' && needs.stage4.outputs.outcome == 'checkpoint' && needs.stage4.outputs.reason == 'time'
+    if: needs.stage4.result == 'success' && needs.stage4.outputs.outcome == 'checkpoint' && (needs.stage4.outputs.reason == 'time' || needs.stage4.outputs.reason == 'next')
     uses: ./.github/workflows/lite-macos-stage.yml
     with:
       stage: 5
       restore_stage: '4'
       restore_run_id: ${{ format('{0}', github.run_id) }}
       restore_attempt: ${{ needs.stage4.outputs.attempt }}
+      shards_run_id: ${{ inputs.resume_stage != '' && inputs.resume_stage != '0' && (inputs.shards_run_id || inputs.resume_run_id) || format('{0}', github.run_id) }}
+      shards_attempt: ${{ inputs.resume_stage != '' && inputs.resume_stage != '0' && (inputs.shards_attempt || inputs.resume_attempt) || format('{0}', github.run_attempt) }}
 
   stage6:
     needs: stage5
-    if: needs.stage5.result == 'success' && needs.stage5.outputs.outcome == 'checkpoint' && needs.stage5.outputs.reason == 'time'
+    if: needs.stage5.result == 'success' && needs.stage5.outputs.outcome == 'checkpoint' && (needs.stage5.outputs.reason == 'time' || needs.stage5.outputs.reason == 'next')
     uses: ./.github/workflows/lite-macos-stage.yml
     with:
       stage: 6
       restore_stage: '5'
       restore_run_id: ${{ format('{0}', github.run_id) }}
       restore_attempt: ${{ needs.stage5.outputs.attempt }}
+      shards_run_id: ${{ inputs.resume_stage != '' && inputs.resume_stage != '0' && (inputs.shards_run_id || inputs.resume_run_id) || format('{0}', github.run_id) }}
+      shards_attempt: ${{ inputs.resume_stage != '' && inputs.resume_stage != '0' && (inputs.shards_attempt || inputs.resume_attempt) || format('{0}', github.run_attempt) }}
 
   stage7:
     needs: stage6
-    if: needs.stage6.result == 'success' && needs.stage6.outputs.outcome == 'checkpoint' && needs.stage6.outputs.reason == 'time'
+    if: needs.stage6.result == 'success' && needs.stage6.outputs.outcome == 'checkpoint' && (needs.stage6.outputs.reason == 'time' || needs.stage6.outputs.reason == 'next')
     uses: ./.github/workflows/lite-macos-stage.yml
     with:
       stage: 7
       restore_stage: '6'
       restore_run_id: ${{ format('{0}', github.run_id) }}
       restore_attempt: ${{ needs.stage6.outputs.attempt }}
+      shards_run_id: ${{ inputs.resume_stage != '' && inputs.resume_stage != '0' && (inputs.shards_run_id || inputs.resume_run_id) || format('{0}', github.run_id) }}
+      shards_attempt: ${{ inputs.resume_stage != '' && inputs.resume_stage != '0' && (inputs.shards_attempt || inputs.resume_attempt) || format('{0}', github.run_attempt) }}
 
   stage8:
     needs: stage7
-    if: needs.stage7.result == 'success' && needs.stage7.outputs.outcome == 'checkpoint' && needs.stage7.outputs.reason == 'time'
+    if: needs.stage7.result == 'success' && needs.stage7.outputs.outcome == 'checkpoint' && (needs.stage7.outputs.reason == 'time' || needs.stage7.outputs.reason == 'next')
     uses: ./.github/workflows/lite-macos-stage.yml
     with:
       stage: 8
       restore_stage: '7'
       restore_run_id: ${{ format('{0}', github.run_id) }}
       restore_attempt: ${{ needs.stage7.outputs.attempt }}
+      shards_run_id: ${{ inputs.resume_stage != '' && inputs.resume_stage != '0' && (inputs.shards_run_id || inputs.resume_run_id) || format('{0}', github.run_id) }}
+      shards_attempt: ${{ inputs.resume_stage != '' && inputs.resume_stage != '0' && (inputs.shards_attempt || inputs.resume_attempt) || format('{0}', github.run_attempt) }}
 
   result:
     needs: [stage1, stage2, stage3, stage4, stage5, stage6, stage7, stage8]

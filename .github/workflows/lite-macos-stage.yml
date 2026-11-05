@@ -15,6 +15,12 @@ on:
       restore_attempt:
         required: true
         type: string
+      shards_run_id:
+        required: true
+        type: string
+      shards_attempt:
+        required: true
+        type: string
     outputs:
       outcome:
         value: ${{ jobs.build.outputs.outcome }}
@@ -32,12 +38,32 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 355
     outputs:
-      outcome: ${{ steps.compile.outputs.outcome }}
-      reason: ${{ steps.compile.outputs.reason }}
+      outcome: ${{ steps.result.outputs.outcome }}
+      reason: ${{ steps.result.outputs.reason }}
       attempt: ${{ github.run_attempt }}
     steps:
       - name: Start the stage clock
         run: echo "LITE_JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+
+      - name: Select this stage's target and cache
+        id: selection
+        env:
+          STAGE: ${{ inputs.stage }}
+        shell: bash
+        run: |
+          case "$STAGE" in
+            1) shard=1; target='v8:v8' ;;
+            2) shard=2; target='third_party/blink/renderer/core:core' ;;
+            3) shard=3; target='third_party/blink/renderer/modules:modules' ;;
+            4) shard=4; target='content/browser:browser' ;;
+            5) shard=5; target='chrome/browser:browser' ;;
+            6) shard=1; target='' ;;
+            7) shard=2; target='' ;;
+            8) shard=3; target='' ;;
+            *) exit 1 ;;
+          esac
+          echo "shard=$shard" >> "$GITHUB_OUTPUT"
+          echo "target=$target" >> "$GITHUB_OUTPUT"
 
       - name: Check out the build source
         if: inputs.restore_stage == '0'
@@ -63,6 +89,17 @@ jobs:
 
       - name: Set up pnpm
         run: npm install --global pnpm@11.11.0
+
+      - name: Install verified ccache binary
+        shell: bash
+        run: |
+          curl -fsSL https://github.com/ccache/ccache/releases/download/v4.14.2/ccache-4.14.2-darwin.tar.gz -o "$RUNNER_TEMP/ccache.tar.gz"
+          echo 'cf240009630b605b775c7c5c7b7105a3b196c79f31af322c1557969aa28003fc  '"$RUNNER_TEMP/ccache.tar.gz" | shasum -a 256 -c -
+          tar -xzf "$RUNNER_TEMP/ccache.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/ccache-4.14.2-darwin" >> "$GITHUB_PATH"
+          echo "CCACHE_DIR=$RUNNER_TEMP/ccache-stats" >> "$GITHUB_ENV"
+          echo 'CCACHE_COMPILERCHECK=content' >> "$GITHUB_ENV"
+          echo 'CCACHE_REMOTE_ONLY=true' >> "$GITHUB_ENV"
 
       - name: Check the macOS SDK and disk
         run: |
@@ -119,23 +156,76 @@ jobs:
         working-directory: src/brave
         run: pnpm run init --no-history --target_arch=arm64
 
+      - name: Validate shard selection
+        env:
+          SHARDS_RUN: ${{ inputs.shards_run_id }}
+          SHARDS_ATTEMPT: ${{ inputs.shards_attempt }}
+        run: |
+          [[ "$SHARDS_RUN" =~ ^[0-9]+$ ]]
+          [[ "$SHARDS_ATTEMPT" =~ ^[0-9]+$ ]]
+
+      - name: Download this target's compiler cache
+        uses: actions/download-artifact@v4
+        with:
+          name: brave-lite-shard-${{ steps.selection.outputs.shard }}-a${{ inputs.shards_attempt }}
+          path: ${{ runner.temp }}/lite-shards/brave-lite-shard-${{ steps.selection.outputs.shard }}-a${{ inputs.shards_attempt }}
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.shards_run_id }}
+
+      - name: Verify the cache before reuse
+        working-directory: src/brave
+        env:
+          SHARDS_ATTEMPT: ${{ inputs.shards_attempt }}
+          SHARD: ${{ steps.selection.outputs.shard }}
+        run: |
+          python3 build/ci/lite_shard_cache.py verify-one \
+            --root "$RUNNER_TEMP/lite-shards" --workspace "$GITHUB_WORKSPACE" \
+            --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA" \
+            --attempt "$SHARDS_ATTEMPT" --shard "$SHARD"
+
       - name: Compile until the stage deadline
         id: compile
         working-directory: src/brave
+        shell: bash
+        env:
+          TARGET: ${{ steps.selection.outputs.target }}
         run: |
+          args=(pnpm run build Static --target_arch=arm64 --skip_signing)
+          if [[ -n "$TARGET" ]]; then args+=(--target="$TARGET"); fi
           python3 build/ci/lite_timebox.py \
             --workspace "$GITHUB_WORKSPACE" --started "$LITE_JOB_STARTED" \
-            -- pnpm run build Static --target_arch=arm64 --skip_signing \
-            --gn=symbol_level:0 \
+            -- "${args[@]}" \
+            --gn=symbol_level:0 --gn=cc_wrapper:ccache \
             --gn=enable_brave_wallet:false \
             --gn=enable_brave_rewards:false \
             --gn=enable_brave_vpn_v1:false \
             --gn=enable_brave_vpn_v2:false \
             --gn=enable_ai_chat:false
 
+      - name: Report compiler cache usage
+        if: always() && steps.compile.outputs.outcome != ''
+        run: ccache --show-stats -v
+
+      - name: Determine the next stage
+        id: result
+        if: always() && steps.compile.outputs.outcome != ''
+        shell: bash
+        env:
+          TARGET: ${{ steps.selection.outputs.target }}
+          OUTCOME: ${{ steps.compile.outputs.outcome }}
+          REASON: ${{ steps.compile.outputs.reason }}
+        run: |
+          if [[ -n "$TARGET" && "$OUTCOME" == complete ]]; then
+            echo 'outcome=checkpoint' >> "$GITHUB_OUTPUT"
+            echo 'reason=next' >> "$GITHUB_OUTPUT"
+          else
+            echo "outcome=$OUTCOME" >> "$GITHUB_OUTPUT"
+            echo "reason=$REASON" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Save build checkpoint
         id: checkpoint
-        if: always() && (steps.compile.outputs.outcome == 'checkpoint' || steps.compile.outcome == 'failure')
+        if: always() && (steps.result.outputs.outcome == 'checkpoint' || steps.compile.outcome == 'failure')
         working-directory: src/brave
         run: |
           python3 build/ci/lite_checkpoint.py save \
@@ -233,7 +323,7 @@ jobs:
           retention-days: 7
 
       - name: Verify the browser
-        if: steps.compile.outputs.outcome == 'complete'
+        if: steps.result.outputs.outcome == 'complete'
         working-directory: src/brave
         run: |
           python3 build/ci/lite_verify_build.py \
@@ -241,7 +331,7 @@ jobs:
             --profile "$RUNNER_TEMP/lite-smoke-profile"
 
       - name: Package the app
-        if: steps.compile.outputs.outcome == 'complete'
+        if: steps.result.outputs.outcome == 'complete'
         shell: bash
         run: |
           set -euo pipefail
@@ -251,7 +341,7 @@ jobs:
           (cd "$RUNNER_TEMP" && shasum -a 256 Brave-Lite-macOS-arm64.zip > SHA256SUMS.txt)
 
       - name: Upload the app
-        if: steps.compile.outputs.outcome == 'complete'
+        if: steps.result.outputs.outcome == 'complete'
         uses: actions/upload-artifact@v4
         with:
           name: Brave-Lite-macOS-arm64-stage-${{ inputs.stage }}

@@ -5,6 +5,9 @@ from pathlib import Path
 import sys
 import time
 import unittest
+from unittest.mock import patch
+import tempfile
+import subprocess
 
 import lite_timebox
 
@@ -36,6 +39,20 @@ class TimeboxTest(unittest.TestCase):
             Path.cwd(), time.time() + 30, 2 ** 70,
         )
         self.assertEqual(result, ("checkpoint", "disk", 0))
+
+    def test_large_cache_stops_the_compiler(self):
+        test_root = Path(__file__).resolve().parents[2] / ".git" / "lite-validation"
+        test_root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=test_root) as name:
+            cache = Path(name)
+            (cache / "object").write_bytes(b"1234")
+            with patch("lite_timebox.subprocess.Popen") as popen, \
+                    patch("lite_timebox.stop_group") as stop:
+                popen.return_value.wait.side_effect = subprocess.TimeoutExpired("build", 10)
+                result = lite_timebox.run_build(["build"], Path.cwd(),
+                                                time.time() + 30, 0, cache, 4)
+                stop.assert_called_once_with(popen.return_value)
+                self.assertEqual(result, ("checkpoint", "cache", 0))
 
 
 if __name__ == "__main__":

@@ -2,9 +2,6 @@ name: Brave Lite macOS build
 
 on:
   workflow_dispatch:
-  push:
-    branches: [lite/v1.98.63]
-    paths: [.github/workflows/lite-macos-build.yml]
 
 permissions:
   contents: read
@@ -15,8 +12,7 @@ jobs:
     timeout-minutes: 355
     env:
       CCACHE_DIR: ${{ github.workspace }}/.brave-ccache
-      CCACHE_MAXSIZE: 4G
-      CCACHE_SLOPPINESS: time_macros
+      CCACHE_MAXSIZE: 0
     steps:
       - name: Check out Brave Core
         uses: actions/checkout@v4
@@ -57,7 +53,12 @@ jobs:
           pnpm run init --no-history --target_arch=arm64
 
       - name: Install the compiler cache
-        run: brew install ccache
+        shell: bash
+        run: |
+          curl -fsSL https://github.com/ccache/ccache/releases/download/v4.14.2/ccache-4.14.2-darwin.tar.gz -o "$RUNNER_TEMP/ccache.tar.gz"
+          echo 'cf240009630b605b775c7c5c7b7105a3b196c79f31af322c1557969aa28003fc  '"$RUNNER_TEMP/ccache.tar.gz" | shasum -a 256 -c -
+          tar -xzf "$RUNNER_TEMP/ccache.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/ccache-4.14.2-darwin" >> "$GITHUB_PATH"
 
       - name: Restore compiler cache
         uses: actions/cache/restore@v4

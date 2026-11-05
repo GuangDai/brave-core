@@ -18,6 +18,10 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 15
     steps:
+      - uses: actions/checkout@v4
+        with:
+          path: src/brave
+          persist-credentials: false
       - name: Install verified ccache binary
         shell: bash
         run: |
@@ -28,22 +32,32 @@ jobs:
           echo "CCACHE_DIR=$RUNNER_TEMP/ccache-stats" >> "$GITHUB_ENV"
           echo 'CCACHE_COMPILERCHECK=content' >> "$GITHUB_ENV"
           echo 'CCACHE_REMOTE_ONLY=true' >> "$GITHUB_ENV"
-          echo "CCACHE_REMOTE_STORAGE=file:$RUNNER_TEMP/lite-cache" >> "$GITHUB_ENV"
+          echo "CCACHE_REMOTE_STORAGE=file:$RUNNER_TEMP/lite-shard/cache" >> "$GITHUB_ENV"
 
       - name: Compile one independent object
         env:
           SHARD: ${{ matrix.shard }}
         run: |
-          mkdir -p "$RUNNER_TEMP/lite-cache"
+          mkdir -p "$RUNNER_TEMP/lite-shard/cache"
           printf 'int lite_shard_%s(void) { return %s; }\n' "$SHARD" "$SHARD" > "$GITHUB_WORKSPACE/lite-shard-$SHARD.c"
           ccache clang -c "$GITHUB_WORKSPACE/lite-shard-$SHARD.c" -o "$GITHUB_WORKSPACE/lite-shard-$SHARD.o"
           ccache --show-stats -v
 
+      - name: Record the cache with production validation code
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          target=$(PYTHONPATH=src/brave/build/ci python3 -c 'import os, lite_shard_cache; print(lite_shard_cache.TARGETS[os.environ["SHARD"]])')
+          python3 src/brave/build/ci/lite_shard_cache.py save \
+            --root "$RUNNER_TEMP/lite-shard" --workspace "$GITHUB_WORKSPACE" \
+            --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA" \
+            --shard "$SHARD" --target "$target" --outcome complete
+
       - name: Upload the shard cache
         uses: actions/upload-artifact@v4
         with:
-          name: lite-parallel-shard-${{ matrix.shard }}
-          path: ${{ runner.temp }}/lite-cache/
+          name: brave-lite-shard-${{ matrix.shard }}-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/lite-shard/
           if-no-files-found: error
           include-hidden-files: true
           retention-days: 1
@@ -53,6 +67,10 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 15
     steps:
+      - uses: actions/checkout@v4
+        with:
+          path: src/brave
+          persist-credentials: false
       - name: Install verified ccache binary
         shell: bash
         run: |
@@ -67,20 +85,20 @@ jobs:
       - name: Download all shard caches
         uses: actions/download-artifact@v4
         with:
-          pattern: lite-parallel-shard-*
+          pattern: brave-lite-shard-*-a${{ github.run_attempt }}
           path: ${{ runner.temp }}/shards
+
+      - name: Verify all shard manifests
+        run: |
+          python3 src/brave/build/ci/lite_shard_cache.py verify-set \
+            --root "$RUNNER_TEMP/shards" --workspace "$GITHUB_WORKSPACE" \
+            --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA" \
+            --attempt "$GITHUB_RUN_ATTEMPT"
 
       - name: Read every object from the shard caches
         shell: bash
         run: |
           set -euo pipefail
-          backends=''
-          for shard in 1 2 3 4 5; do
-            backend="$RUNNER_TEMP/shards/lite-parallel-shard-$shard"
-            test -d "$backend"
-            backends="$backends file:$backend|read-only"
-          done
-          export CCACHE_REMOTE_STORAGE="${backends# }"
           for shard in 1 2 3 4 5; do
             printf 'int lite_shard_%s(void) { return %s; }\n' "$shard" "$shard" > "$GITHUB_WORKSPACE/lite-shard-$shard.c"
             ccache clang -c "$GITHUB_WORKSPACE/lite-shard-$shard.c" -o "$GITHUB_WORKSPACE/lite-shard-$shard.o"

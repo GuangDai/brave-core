@@ -1,0 +1,112 @@
+name: macOS compiler cache shard
+
+on:
+  workflow_call:
+    inputs:
+      shard:
+        required: true
+        type: string
+      target:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    runs-on: macos-26
+    timeout-minutes: 355
+    steps:
+      - name: Start the stage clock
+        run: echo "LITE_JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+
+      - name: Check out Brave Core
+        uses: actions/checkout@v4
+        with:
+          path: src/brave
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.16.0
+
+      - name: Set up pnpm
+        run: npm install --global pnpm@11.11.0
+
+      - name: Install verified ccache binary
+        shell: bash
+        run: |
+          curl -fsSL https://github.com/ccache/ccache/releases/download/v4.14.2/ccache-4.14.2-darwin.tar.gz -o "$RUNNER_TEMP/ccache.tar.gz"
+          echo 'cf240009630b605b775c7c5c7b7105a3b196c79f31af322c1557969aa28003fc  '"$RUNNER_TEMP/ccache.tar.gz" | shasum -a 256 -c -
+          tar -xzf "$RUNNER_TEMP/ccache.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/ccache-4.14.2-darwin" >> "$GITHUB_PATH"
+          echo "CCACHE_DIR=$RUNNER_TEMP/ccache-stats" >> "$GITHUB_ENV"
+          echo 'CCACHE_COMPILERCHECK=content' >> "$GITHUB_ENV"
+          echo 'CCACHE_REMOTE_ONLY=true' >> "$GITHUB_ENV"
+          echo "CCACHE_REMOTE_STORAGE=file:$RUNNER_TEMP/lite-shard/cache" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/lite-shard/cache"
+
+      - name: Install build dependencies
+        working-directory: src/brave
+        run: pnpm install --frozen-lockfile --yes
+
+      - name: Initialize Chromium
+        working-directory: src/brave
+        run: |
+          xcodebuild -version
+          xcrun --sdk macosx --show-sdk-version
+          df -h "$GITHUB_WORKSPACE"
+          pnpm run init --no-history --target_arch=arm64
+
+      - name: Compile one target into its own cache
+        id: compile
+        working-directory: src/brave
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          python3 build/ci/lite_timebox.py \
+            --workspace "$GITHUB_WORKSPACE" --started "$LITE_JOB_STARTED" \
+            --budget-minutes 235 --reserve-gib 18 \
+            --cache-dir "$RUNNER_TEMP/lite-shard/cache" --cache-limit-gib 8 \
+            -- pnpm run build Static --target_arch=arm64 --skip_signing \
+            --target="$TARGET" --gn=symbol_level:0 --gn=cc_wrapper:ccache \
+            --gn=enable_brave_wallet:false \
+            --gn=enable_brave_rewards:false \
+            --gn=enable_brave_vpn_v1:false \
+            --gn=enable_brave_vpn_v2:false \
+            --gn=enable_ai_chat:false
+
+      - name: Report compiler cache usage
+        if: always() && steps.compile.outputs.outcome != ''
+        run: |
+          ccache --show-stats -v
+          df -h "$GITHUB_WORKSPACE"
+
+      - name: Record the shard's files and toolchain
+        id: manifest
+        if: always() && steps.compile.outputs.outcome != ''
+        working-directory: src/brave
+        env:
+          SHARD: ${{ inputs.shard }}
+          TARGET: ${{ inputs.target }}
+          OUTCOME: ${{ steps.compile.outputs.outcome }}
+          REASON: ${{ steps.compile.outputs.reason }}
+        run: |
+          python3 build/ci/lite_shard_cache.py save \
+            --root "$RUNNER_TEMP/lite-shard" --workspace "$GITHUB_WORKSPACE" \
+            --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA" \
+            --shard "$SHARD" --target "$TARGET" --outcome "$OUTCOME" --reason "$REASON"
+
+      - name: Upload this independent cache
+        if: always() && steps.manifest.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: brave-lite-shard-${{ inputs.shard }}-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/lite-shard/
+          if-no-files-found: error
+          include-hidden-files: true
+          compression-level: 0
+          retention-days: 7
