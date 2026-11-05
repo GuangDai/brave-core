@@ -123,6 +123,29 @@ describe('Apply Patches', function () {
     )
   })
 
+  test('limits concurrent git subprocesses when reading patch data', async function () {
+    let active = 0
+    let peak = 0
+    jest.spyOn(gitPatcher, 'getAppliesTo').mockImplementation(async () => {
+      active++
+      peak = Math.max(peak, active)
+      await new Promise((resolve) => setTimeout(resolve, 2))
+      active--
+      throw new Error('stop before applying')
+    })
+    jest.spyOn(gitPatcher, 'resetRepoFiles').mockResolvedValue()
+
+    const patches = Array.from({ length: 20 }, (_, i) => ({
+      patchPath: `patch-${i}`,
+      reason: patchApplyReasons.NO_PATCH_INFO,
+    }))
+    const results = await gitPatcher.performApplyForPatches(patches)
+
+    expect(results).toHaveLength(patches.length)
+    expect(peak).toBe(1)
+    expect(results.every((result) => result.error)).toBe(true)
+  })
+
   test('does not apply patch to still-patched', async function () {
     validate()
     const testFile1StatsInitial = await fs.stat(testFile1Path)

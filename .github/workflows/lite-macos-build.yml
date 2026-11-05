@@ -38,6 +38,18 @@ jobs:
           xcodebuild -version
           xcrun --sdk macosx --show-sdk-version
 
+      - name: Install build dependencies
+        working-directory: src/brave
+        run: pnpm install --frozen-lockfile --yes
+
+      - name: Test the patch application tool
+        working-directory: src/brave
+        env:
+          TMPDIR: ${{ github.workspace }}/src/brave/.ci-patcher-tests
+        run: |
+          mkdir -p "$TMPDIR"
+          pnpm exec jest --runInBand --runTestsByPath build/commands/lib/gitPatcher.test.js
+
       - name: Initialize a shallow Chromium checkout
         working-directory: src/brave
         run: |

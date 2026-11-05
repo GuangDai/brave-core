@@ -201,11 +201,10 @@ export class GitPatcher {
   }
 
   async performApplyForPatches(patchesToApply) {
-    // The actual apply cannot be done in parallel with other write ops,
-    // but everything else can.
+    // Bound git subprocesses to avoid exhausting CI runner process limits.
     // First, find out which files the patch applies to, so we know
     // which files to reset.
-    const prepOps = []
+    const patchSets = []
     this.logProgress(os.EOL + 'Getting patch data...')
     for (const patchData of patchesToApply) {
       // Flagging patches that failed due to their source being deleted, so we
@@ -214,8 +213,8 @@ export class GitPatcher {
         patchData.reason === patchApplyReasons.SRC_REMOVED
           ? new Error('Target file does not exist')
           : undefined
-      prepOps.push(
-        this.getAppliesTo(patchData.patchPath)
+      patchSets.push(
+        await this.getAppliesTo(patchData.patchPath)
           .then((appliesTo) => ({
             appliesTo,
             error,
@@ -234,7 +233,6 @@ export class GitPatcher {
       )
     }
 
-    const patchSets = await Promise.all(prepOps)
     this.logProgress(os.EOL + 'Resetting...')
     // Reset all repo files
     const allRepoPaths = patchSets
