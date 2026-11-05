@@ -31,17 +31,21 @@ compressed, SHA-256-verified volumes; the next stage restores those volumes.
 The full checkout is preserved so that incremental build metadata and source
 timestamps survive. Later stages reuse the already checked GN graph unless its
 arguments change or graph generation was interrupted. A shortage of disk space
-stops the workflow for inspection.
+stops the workflow for inspection. Restore streams each volume from GitHub,
+checking its SHA-256 while extracting, so an extra complete local copy of the
+compressed checkpoint is not required.
 Artifacts are retained for up to 90 days. Actual build speed, artifact sizes and
 GitHub storage availability need to be measured on a full build.
 
 To resume manually, run the workflow on the same commit and enter the previous
 run ID, stage number, and attempt. If the checkpoint was created by a resumed
 run, enter the original shard run ID and attempt as well. Restore requires the
-same commit, workspace path, architecture, macOS major version, Xcode build and
-SDK version. The runner image and macOS minor version may differ. Checkpoints
-include executable build outputs; the smoke test still needs to pass after a
-restore.
+same source commit, workspace path, architecture, macOS major version, Xcode
+build and SDK version. If the workflow changed after the checkpoint was saved,
+enter the checkpoint's source commit in `resume_source_commit`. The app artifact
+records both the source and workflow commits. The runner image and macOS minor
+version may differ. Checkpoints include executable build outputs; the smoke test
+still needs to pass after a restore.
 
 For a new build, supplying an earlier shard run ID skips the five shard jobs
 and attempts to reuse the available caches, including caches saved after a

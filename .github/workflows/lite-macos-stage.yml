@@ -21,6 +21,9 @@ on:
       shards_attempt:
         required: true
         type: string
+      source_commit:
+        required: true
+        type: string
     outputs:
       outcome:
         value: ${{ jobs.build.outputs.outcome }}
@@ -40,6 +43,7 @@ jobs:
     env:
       BRAVE_LITE_KEEP_BUILD_OUTPUT: '1'
       BRAVE_LITE_REUSE_GN: ${{ inputs.restore_stage != '0' && '1' || '0' }}
+      LITE_SOURCE_COMMIT: ${{ inputs.source_commit }}
       pnpm_config_fetch_retries: '6'
       pnpm_config_fetch_retry_mintimeout: '10000'
       pnpm_config_fetch_retry_maxtimeout: '60000'
@@ -49,7 +53,9 @@ jobs:
       attempt: ${{ github.run_attempt }}
     steps:
       - name: Start the stage clock
-        run: echo "LITE_JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+        run: |
+          [[ "$LITE_SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          echo "LITE_JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
 
       - name: Select this stage's target and cache
         id: selection
@@ -76,6 +82,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: src/brave
+          ref: ${{ inputs.source_commit }}
           fetch-depth: 128
           persist-credentials: false
 
@@ -124,24 +131,29 @@ jobs:
           [[ "$RESTORE_RUN" =~ ^[0-9]+$ ]]
           [[ "$RESTORE_ATTEMPT" =~ ^[0-9]+$ ]]
 
-      - name: Download checkpoint volumes
+      - name: Download the checkpoint manifest
         if: inputs.restore_stage != '0'
         uses: actions/download-artifact@v4
         with:
-          pattern: brave-lite-s${{ inputs.restore_stage }}-a${{ inputs.restore_attempt }}-*
-          path: ${{ runner.temp }}/lite-restore
-          merge-multiple: true
+          name: brave-lite-s${{ inputs.restore_stage }}-a${{ inputs.restore_attempt }}-manifest
+          path: ${{ runner.temp }}/lite-restore-manifest
           github-token: ${{ github.token }}
           run-id: ${{ inputs.restore_run_id }}
 
-      - name: Verify and restore checkpoint
+      - name: Stream and verify the checkpoint
         if: inputs.restore_stage != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESTORE_RUN: ${{ inputs.restore_run_id }}
+          RESTORE_ATTEMPT: ${{ inputs.restore_attempt }}
+          RESTORE_STAGE: ${{ inputs.restore_stage }}
         run: |
-          python3 .lite-tools/build/ci/lite_checkpoint.py restore \
+          python3 .lite-tools/build/ci/lite_stream_checkpoint.py \
             --workspace "$GITHUB_WORKSPACE" \
-            --checkpoint "$RUNNER_TEMP/lite-restore" \
-            --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA"
-          test "$(git -C src/brave rev-parse HEAD)" = "$GITHUB_SHA"
+            --manifest "$RUNNER_TEMP/lite-restore-manifest/manifest.json" \
+            --repository "$GITHUB_REPOSITORY" --commit "$LITE_SOURCE_COMMIT" \
+            --run-id "$RESTORE_RUN" --attempt "$RESTORE_ATTEMPT" --stage "$RESTORE_STAGE"
+          test "$(git -C src/brave rev-parse HEAD)" = "$LITE_SOURCE_COMMIT"
 
       - name: Initialize Chromium
         if: inputs.restore_stage == '0'
@@ -199,7 +211,7 @@ jobs:
         run: |
           python3 build/ci/lite_cache_parts.py verify \
             --root "$RUNNER_TEMP/lite-shard-parts" --workspace "$GITHUB_WORKSPACE" \
-            --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA" \
+            --repository "$GITHUB_REPOSITORY" --commit "$LITE_SOURCE_COMMIT" \
             --attempt "$ATTEMPT" --shard "$SHARD"
 
       - name: Download a legacy single cache
@@ -222,7 +234,7 @@ jobs:
         run: |
           python3 build/ci/lite_shard_cache.py verify-one \
             --root "$RUNNER_TEMP/lite-shards" --workspace "$GITHUB_WORKSPACE" \
-            --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA" \
+            --repository "$GITHUB_REPOSITORY" --commit "$LITE_SOURCE_COMMIT" \
             --attempt "$SHARDS_ATTEMPT" --shard "$SHARD"
 
       - name: Continue without this missing cache
@@ -288,7 +300,16 @@ jobs:
           app=$(find "$GITHUB_WORKSPACE/src/out/Static_arm64" -maxdepth 1 -name '*.app' -type d -print -quit)
           test -n "$app"
           ditto -c -k --sequesterRsrc --keepParent "$app" "$RUNNER_TEMP/Brave-Lite-macOS-arm64.zip"
-          (cd "$RUNNER_TEMP" && shasum -a 256 Brave-Lite-macOS-arm64.zip > SHA256SUMS.txt)
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          info = {"source_commit": os.environ["LITE_SOURCE_COMMIT"],
+                  "workflow_commit": os.environ["GITHUB_SHA"]}
+          (Path(os.environ["RUNNER_TEMP"]) / "BUILD_PROVENANCE.json").write_text(
+              json.dumps(info, indent=2) + "\n")
+          PY
+          (cd "$RUNNER_TEMP" && shasum -a 256 Brave-Lite-macOS-arm64.zip BUILD_PROVENANCE.json > SHA256SUMS.txt)
 
       - name: Upload the app
         if: steps.result.outputs.outcome == 'complete'
@@ -297,6 +318,7 @@ jobs:
           name: Brave-Lite-macOS-arm64-stage-${{ inputs.stage }}
           path: |
             ${{ runner.temp }}/Brave-Lite-macOS-arm64.zip
+            ${{ runner.temp }}/BUILD_PROVENANCE.json
             ${{ runner.temp }}/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 90
@@ -310,7 +332,7 @@ jobs:
           python3 build/ci/lite_checkpoint.py save \
             --workspace "$GITHUB_WORKSPACE" \
             --checkpoint "$RUNNER_TEMP/lite-checkpoint" \
-            --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA"
+            --repository "$GITHUB_REPOSITORY" --commit "$LITE_SOURCE_COMMIT"
 
       - name: Upload checkpoint manifest
         if: always() && steps.checkpoint.outcome == 'success'
