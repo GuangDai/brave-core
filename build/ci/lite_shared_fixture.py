@@ -2,6 +2,7 @@
 """Create and verify a tiny shared-prerequisite handoff fixture."""
 
 import argparse
+import json
 from pathlib import Path
 
 
@@ -49,9 +50,21 @@ def verify(root, expect_leaf, build_name="Static"):
     print("Verified shared prerequisite and group outputs:", compiled)
 
 
+def timestamps(root, build_name):
+    paths = ['shared.c', 'fakecc.py', f'out/{build_name}/obj/shared.o',
+             f'out/{build_name}/build.ninja', f'out/{build_name}/brave_lite_graph.ninja',
+             f'out/{build_name}/.siso_fs_state', f'out/{build_name}/.siso_deps']
+    for name in paths:
+        path = root / name
+        if path.exists():
+            stat = path.stat()
+            print(json.dumps({'path': name, 'mtime_ns': stat.st_mtime_ns,
+                              'ctime_ns': stat.st_ctime_ns, 'size': stat.st_size}))
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=["create", "bootstrap", "group"])
+    parser.add_argument("action", choices=["create", "bootstrap", "group", "timestamps"])
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--build-name", default="Static")
     args = parser.parse_args()
@@ -59,6 +72,8 @@ def main():
         parser.error("Invalid fixture build name")
     if args.action == "create":
         create(args.root, args.build_name)
+    elif args.action == "timestamps":
+        timestamps(args.root, args.build_name)
     else:
         verify(args.root, args.action == "group", args.build_name)
 

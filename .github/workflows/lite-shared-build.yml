@@ -237,8 +237,28 @@ jobs:
           encoded=$(python3 -c 'import os, urllib.parse; print(urllib.parse.quote(os.environ["BRANCH"], safe=""))')
           head=$(gh api "repos/$GITHUB_REPOSITORY/branches/$encoded" --jq '.commit.sha')
           [[ "$head" == "$GITHUB_SHA" ]] || { echo '::error::Workflow branch changed; start assembly manually.'; exit 1; }
-          gh workflow run lite-macos-staged.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH" \
+          url=$(gh workflow run lite-macos-staged.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH" \
             -f "resume_run_id=$GITHUB_RUN_ID" -f "resume_stage=$BOOTSTRAP_STAGE" \
             -f "resume_attempt=$BOOTSTRAP_ATTEMPT" -f "resume_source_commit=$SOURCE_COMMIT" \
             -f "shards_run_id=$GITHUB_RUN_ID" -f "shards_attempt=$GITHUB_RUN_ATTEMPT" \
-            -f start_phase=shared
+            -f start_phase=shared)
+          echo "$url"
+          run_id=${url##*/}
+          [[ "$run_id" =~ ^[0-9]+$ ]]
+          export ASSEMBLY_RUN_ID="$run_id"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          env = os.environ
+          data = {'repository': env['GITHUB_REPOSITORY'], 'parent_run': env['GITHUB_RUN_ID'],
+                  'run_id': env['ASSEMBLY_RUN_ID'], 'source_commit': env['SOURCE_COMMIT'],
+                  'bootstrap_stage': env['BOOTSTRAP_STAGE'], 'bootstrap_attempt': env['BOOTSTRAP_ATTEMPT']}
+          (Path(env['RUNNER_TEMP']) / 'assembly-dispatch.json').write_text(json.dumps(data, indent=2) + '\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brave-lite-assembly-dispatch-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/assembly-dispatch.json
+          if-no-files-found: error
+          retention-days: 90

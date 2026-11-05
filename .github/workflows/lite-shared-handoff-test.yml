@@ -42,6 +42,7 @@ jobs:
           (cd fixture && tools/siso/siso ninja -C out/Static brave_lite_shared -k 1 \
             -f brave_lite_shared.ninja --offline -cache_dir "$GITHUB_WORKSPACE/fixture/siso-cache")
           python3 build/ci/lite_shared_fixture.py bootstrap --root "$GITHUB_WORKSPACE/fixture"
+          python3 build/ci/lite_shared_fixture.py timestamps --root "$GITHUB_WORKSPACE/fixture"
           python3 build/ci/lite_checkpoint.py save --workspace "$GITHUB_WORKSPACE/fixture" \
             --checkpoint "$RUNNER_TEMP/checkpoint" --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA"
           python3 build/ci/lite_stage_phase.py record --manifest "$RUNNER_TEMP/checkpoint/manifest.json" \
@@ -87,6 +88,8 @@ jobs:
             --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --stage 1
           [[ "$(python3 build/ci/lite_stage_phase.py next --manifest "$RUNNER_TEMP/manifest/manifest.json" \
             --phase 5 --mode assembly)" == 1 ]]
-          (cd fixture && tools/siso/siso ninja -C out/Static "brave_lite_group_$GROUP" -k 1 \
+          python3 build/ci/lite_shared_fixture.py timestamps --root "$GITHUB_WORKSPACE/fixture"
+          (cd fixture && tools/siso/siso ninja -C out/Static "brave_lite_group_$GROUP" -k 1 -d explain \
             -f brave_lite_graph.ninja --offline -cache_dir "$GITHUB_WORKSPACE/fixture/siso-cache")
+          if [[ -f fixture/out/Static/siso_explain ]]; then tail -n 80 fixture/out/Static/siso_explain; fi
           python3 build/ci/lite_shared_fixture.py group --root "$GITHUB_WORKSPACE/fixture"
