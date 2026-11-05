@@ -10,9 +10,10 @@ some settings routes and resources may still be present in the binary. Existing
 saved data is not deleted. Browser tests cover the altered menu and feature
 gates; a successful build and test run are required to validate them.
 
-The `Brave Lite macOS build` GitHub Actions workflow initializes a shallow
-checkout and builds an unsigned Apple Silicon `Static` browser. If it succeeds,
-the workflow uploads a ZIP and a SHA-256 checksum. The build is not notarized.
+The `Brave Lite macOS build` GitHub Actions workflow uses a macOS 26 runner,
+initializes a shallow checkout and builds an unsigned Apple Silicon `Static`
+browser. If it succeeds, the workflow uploads a ZIP and a SHA-256 checksum.
+The build is not notarized.
 
 The workflow restores a compiler cache after checkout and saves it even when
 compilation fails or reaches its step time limit. This cache covers eligible

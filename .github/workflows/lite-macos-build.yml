@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 355
     env:
       CCACHE_DIR: ${{ github.workspace }}/.brave-ccache
@@ -32,6 +32,11 @@ jobs:
 
       - name: Set up pnpm
         run: npm install --global pnpm@11.11.0
+
+      - name: Check the macOS SDK
+        run: |
+          xcodebuild -version
+          xcrun --sdk macosx --show-sdk-version
 
       - name: Initialize a shallow Chromium checkout
         working-directory: src/brave
