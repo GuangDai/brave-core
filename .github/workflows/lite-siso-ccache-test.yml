@@ -1,0 +1,38 @@
+name: Test Siso source overrides with ccache
+
+on:
+  push:
+    branches: [ci/streaming-checkpoints]
+    paths:
+      - .github/workflows/lite-siso-ccache-test.yml
+      - build/config/siso/brave_siso_config.star
+      - build/ci/lite_siso_ccache_test.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install the Chromium-pinned Siso and verified ccache
+        shell: bash
+        run: |
+          curl -fsSL 'https://chrome-infra-packages.appspot.com/client?platform=mac-arm64&version=git_revision:43615ea9acdcc6c1c213c5c7a30a568fdeb7c3dc' -o "$RUNNER_TEMP/cipd"
+          chmod +x "$RUNNER_TEMP/cipd"
+          printf '%s\n' 'build/siso/mac-arm64 git_revision:c574896b272b40aac6e44c228ee0b471ea7e3d7d' > "$RUNNER_TEMP/siso.ensure"
+          CIPD_CACHE_DIR="$RUNNER_TEMP/cipd-cache" "$RUNNER_TEMP/cipd" ensure \
+            -root "$RUNNER_TEMP/siso" -ensure-file "$RUNNER_TEMP/siso.ensure"
+          curl -fsSL https://github.com/ccache/ccache/releases/download/v4.14.2/ccache-4.14.2-darwin.tar.gz -o "$RUNNER_TEMP/ccache.tar.gz"
+          echo 'cf240009630b605b775c7c5c7b7105a3b196c79f31af322c1557969aa28003fc  '"$RUNNER_TEMP/ccache.tar.gz" | shasum -a 256 -c -
+          tar -xzf "$RUNNER_TEMP/ccache.tar.gz" -C "$RUNNER_TEMP"
+      - name: Compile a synthetic source override
+        run: |
+          LITE_SISO_TEST_BINARY="$RUNNER_TEMP/siso/siso" \
+          LITE_CCACHE_TEST_BINARY="$RUNNER_TEMP/ccache-4.14.2-darwin/ccache" \
+            python3 build/ci/lite_siso_ccache_test.py -v

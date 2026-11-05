@@ -190,6 +190,17 @@ def __adjust_handlers(ctx, step_config, handlers):
             __wrap_python_with_chromium_src_inputs_handler(ctx, rule, handlers)
             continue
 
+    # `cc_wrapper = "ccache"` adds a prefix to local clang commands. Siso
+    # matches the first rule by command prefix, so these commands otherwise miss
+    # the clang rule and compile Chromium sources without Brave's overrides.
+    if not __HOST_OS_IS_WINDOWS:
+        step_config["rules"] = [{
+            "name": "brave_ccache_redirect_cc",
+            "command_prefix": "ccache ../../third_party/llvm-build/Release+Asserts/bin/clang",
+            "handler": "redirect_cc",
+            "remote": False,
+        }] + step_config["rules"]
+
     # If no clang rule was found, add one with redirect_cc handler to handle
     # C/C++ source file overrides from chromium_src directory.
     if not found_clang_rule:
