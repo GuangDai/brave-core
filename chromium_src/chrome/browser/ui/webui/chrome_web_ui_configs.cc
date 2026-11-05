@@ -15,6 +15,8 @@
 #include "brave/components/email_aliases/buildflags/buildflags.h"
 #include "brave/components/psst/buildflags/buildflags.h"
 #include "brave/components/speedreader/common/buildflags/buildflags.h"
+#include "build/build_config.h"
+#include "components/password_manager/content/common/web_ui_constants.h"
 #include "content/public/browser/webui_config_map.h"
 
 #if BUILDFLAG(ENABLE_AI_CHAT)
@@ -111,6 +113,10 @@ void RegisterChromeWebUIConfigs() {
   RegisterChromeWebUIConfigs_ChromiumImpl();
 
   auto& map = content::WebUIConfigMap::GetInstance();
+#if BUILDFLAG(IS_MAC)
+  map.RemoveConfig(GetWebUIConfigURL(
+      content::kChromeUIScheme, password_manager::kChromeUIPasswordManagerHost));
+#endif
   // Remove configs for Chromium WebUIs that we replace with our own WebUIs.
   // The map doesn't allow for multiple entries for the same origin, so the
   // upstream configs must be removed before we can add our own configs.

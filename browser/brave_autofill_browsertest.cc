@@ -17,6 +17,7 @@
 #include "components/autofill/core/common/autofill_prefs.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/webui_config_map.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "net/dns/mock_host_resolver.h"
@@ -84,6 +85,8 @@ IN_PROC_BROWSER_TEST_F(BraveAutofillBrowserTest,
   prefs->SetBoolean(autofill::prefs::kAutofillCreditCardEnabled, true);
   EXPECT_FALSE(autofill::prefs::IsAutofillProfileEnabled(prefs));
   EXPECT_FALSE(autofill::prefs::IsAutofillPaymentMethodsEnabled(prefs));
+  EXPECT_FALSE(content::WebUIConfigMap::GetInstance().GetConfig(
+      browser()->GetProfile(), GURL("chrome://password-manager/")));
 #endif
   TestAutofillInWindow(browser(), url, !BUILDFLAG(IS_MAC));
   BrowserWindowInterface* private_browser = CreateIncognitoBrowser(nullptr);

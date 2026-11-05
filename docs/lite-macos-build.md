@@ -5,10 +5,10 @@ Wallet, Rewards, VPN and Leo AI default to disabled at compile time.
 
 Chromium's Autofill, password manager and translation are shared components.
 Small Chromium patches disable their main filling and translation paths on
-macOS and remove their main menu entries. Their code, settings routes and some
-resources may still be present in the binary. Existing saved data is not
-deleted. Browser tests cover the altered menu and feature gates; a successful
-build and test run are required to validate them.
+macOS. The main menu entries and password manager WebUI are removed. Their code,
+some settings routes and resources may still be present in the binary. Existing
+saved data is not deleted. Browser tests cover the altered menu and feature
+gates; a successful build and test run are required to validate them.
 
 The `Brave Lite macOS build` GitHub Actions workflow initializes a shallow
 checkout and builds an unsigned Apple Silicon `Static` browser. If it succeeds,
